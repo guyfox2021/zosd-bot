@@ -2,12 +2,23 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def main_menu_kb() -> ReplyKeyboardMarkup:
+def back_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Анонімні питання/пропозиції")],
-            [KeyboardButton(text="Шпаргалка")],
-        ],
+        keyboard=[[KeyboardButton(text="⬅️ Назад")]],
+        resize_keyboard=True,
+    )
+
+
+def main_menu_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    keyboard = [
+        [KeyboardButton(text="❓Анонімні питання/пропозиції/скарги")],
+        [KeyboardButton(text="📚 Шпаргалка")],
+    ]
+    if is_admin:
+        keyboard.append([KeyboardButton(text="🛠 Панель адміністратора")])
+
+    return ReplyKeyboardMarkup(
+        keyboard=keyboard,
         resize_keyboard=True,
         input_field_placeholder="Оберіть дію…",
     )

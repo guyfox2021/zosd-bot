@@ -1,5 +1,5 @@
 import aiosqlite
-from typing import Optional, Iterable
+from typing import Optional
 
 
 class Database:
@@ -183,4 +183,63 @@ class Database:
     async def delete_item(self, item_id: int):
         assert self.conn is not None
         await self.conn.execute("DELETE FROM cheat_items WHERE id=?;", (item_id,))
+        await self.conn.commit()
+
+    # --- Ordering: sections ---
+    async def normalize_section_orders(self):
+        """Выровнять sort_order для всех разделов: 0..N по текущей сортировке."""
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT id FROM cheat_sections ORDER BY sort_order, id;")
+        rows = await cur.fetchall()
+        for i, r in enumerate(rows):
+            await self.conn.execute(
+                "UPDATE cheat_sections SET sort_order=? WHERE id=?;",
+                (i, int(r["id"])),
+            )
+        await self.conn.commit()
+
+    async def move_section(self, section_id: int, direction: str):
+        """
+        direction: 'up' | 'down'
+        Меняем местами sort_order с соседним разделом.
+        """
+        assert self.conn is not None
+
+        cur = await self.conn.execute(
+            "SELECT id, sort_order FROM cheat_sections WHERE id=?;",
+            (section_id,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return
+
+        so = int(row["sort_order"])
+
+        if direction == "up":
+            cur2 = await self.conn.execute(
+                """SELECT id, sort_order FROM cheat_sections
+                   WHERE sort_order < ?
+                   ORDER BY sort_order DESC, id DESC
+                   LIMIT 1;""",
+                (so,),
+            )
+        else:
+            cur2 = await self.conn.execute(
+                """SELECT id, sort_order FROM cheat_sections
+                   WHERE sort_order > ?
+                   ORDER BY sort_order ASC, id ASC
+                   LIMIT 1;""",
+                (so,),
+            )
+
+        neigh = await cur2.fetchone()
+        if not neigh:
+            return
+
+        n_id = int(neigh["id"])
+        n_so = int(neigh["sort_order"])
+
+        # swap
+        await self.conn.execute("UPDATE cheat_sections SET sort_order=? WHERE id=?;", (n_so, section_id))
+        await self.conn.execute("UPDATE cheat_sections SET sort_order=? WHERE id=?;", (so, n_id))
         await self.conn.commit()

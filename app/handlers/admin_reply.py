@@ -26,9 +26,7 @@ async def start_reply(call: CallbackQuery, state: FSMContext, db: Database, conf
     await state.update_data(ticket_id=ticket_id)
 
     await call.answer()
-    await call.message.reply(
-        f"Введіть відповідь для звернення <b>#{ticket_id}</b> (одним повідомленням):"
-    )
+    await call.message.reply(f"Введіть відповідь для звернення <b>#{ticket_id}</b> (одним повідомленням):")
 
 
 @r.message(AdminReply.waiting_answer, F.text)
@@ -40,6 +38,7 @@ async def send_answer(message: Message, state: FSMContext, db: Database, config:
     data = await state.get_data()
     ticket_id = int(data["ticket_id"])
     answer = message.text.strip()
+
     if len(answer) < 1:
         await message.answer("Відповідь порожня. Спробуйте ще раз.")
         return
@@ -53,13 +52,10 @@ async def send_answer(message: Message, state: FSMContext, db: Database, config:
     await db.answer_ticket(ticket_id, answer)
     user_id = int(ticket["user_id"])
 
-    # Send to user
     try:
         await message.bot.send_message(
             user_id,
-            f"✅ Відповідь на звернення <b>#{ticket_id}</b>:
-
-{answer}",
+            f"✅ Відповідь на звернення <b>#{ticket_id}</b>:\n\n{answer}",
         )
     except Exception:
         await message.answer("⚠️ Не вдалося надіслати відповідь користувачу (можливо, він заблокував бота).")

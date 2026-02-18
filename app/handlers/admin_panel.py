@@ -13,5 +13,15 @@ async def admin_home(call: CallbackQuery, config: Config):
     if not is_admin(call.from_user.id, config):
         await call.answer("Немає доступу", show_alert=True)
         return
-    await call.message.edit_text("Панель адміністратора:", reply_markup=admin_panel_kb())
+
+    # ✅ ReplyKeyboardMarkup нельзя использовать в edit_text — только в answer()
+    await call.message.answer("Панель адміністратора:", reply_markup=admin_panel_kb())
     await call.answer()
+
+
+# ✅ На всякий случай: если вход в админку происходит через команду или кнопку-текст
+@r.message(F.text.in_({"🛠 Панель адміністратора", "Панель адміністратора", "/admin"}))
+async def admin_home_msg(message: Message, config: Config):
+    if not is_admin(message.from_user.id, config):
+        return
+    await message.answer("Панель адміністратора:", reply_markup=admin_panel_kb())
