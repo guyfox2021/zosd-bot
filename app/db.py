@@ -185,29 +185,32 @@ class Database:
         await self.conn.execute("DELETE FROM cheat_items WHERE id=?;", (item_id,))
         await self.conn.commit()
 
-    # --- Ordering: sections ---
-    async def normalize_section_orders(self):
-        """Выровнять sort_order для всех разделов: 0..N по текущей сортировке."""
+    # --- Ordering: items (within section) ---
+    async def normalize_item_orders(self, section_id: int):
+        """Выровнять sort_order для пунктов раздела: 0..N по текущей сортировке."""
         assert self.conn is not None
-        cur = await self.conn.execute("SELECT id FROM cheat_sections ORDER BY sort_order, id;")
+        cur = await self.conn.execute(
+            "SELECT id FROM cheat_items WHERE section_id=? ORDER BY sort_order, id;",
+            (section_id,),
+        )
         rows = await cur.fetchall()
         for i, r in enumerate(rows):
             await self.conn.execute(
-                "UPDATE cheat_sections SET sort_order=? WHERE id=?;",
+                "UPDATE cheat_items SET sort_order=? WHERE id=?;",
                 (i, int(r["id"])),
             )
         await self.conn.commit()
 
-    async def move_section(self, section_id: int, direction: str):
+    async def move_item(self, item_id: int, section_id: int, direction: str):
         """
         direction: 'up' | 'down'
-        Меняем местами sort_order с соседним разделом.
+        Меняем местами sort_order с соседним пунктом в этом же разделе.
         """
         assert self.conn is not None
 
         cur = await self.conn.execute(
-            "SELECT id, sort_order FROM cheat_sections WHERE id=?;",
-            (section_id,),
+            "SELECT id, sort_order FROM cheat_items WHERE id=? AND section_id=?;",
+            (item_id, section_id),
         )
         row = await cur.fetchone()
         if not row:
@@ -217,19 +220,19 @@ class Database:
 
         if direction == "up":
             cur2 = await self.conn.execute(
-                """SELECT id, sort_order FROM cheat_sections
-                   WHERE sort_order < ?
+                """SELECT id, sort_order FROM cheat_items
+                   WHERE section_id=? AND sort_order < ?
                    ORDER BY sort_order DESC, id DESC
                    LIMIT 1;""",
-                (so,),
+                (section_id, so),
             )
         else:
             cur2 = await self.conn.execute(
-                """SELECT id, sort_order FROM cheat_sections
-                   WHERE sort_order > ?
+                """SELECT id, sort_order FROM cheat_items
+                   WHERE section_id=? AND sort_order > ?
                    ORDER BY sort_order ASC, id ASC
                    LIMIT 1;""",
-                (so,),
+                (section_id, so),
             )
 
         neigh = await cur2.fetchone()
@@ -240,6 +243,6 @@ class Database:
         n_so = int(neigh["sort_order"])
 
         # swap
-        await self.conn.execute("UPDATE cheat_sections SET sort_order=? WHERE id=?;", (n_so, section_id))
-        await self.conn.execute("UPDATE cheat_sections SET sort_order=? WHERE id=?;", (so, n_id))
+        await self.conn.execute("UPDATE cheat_items SET sort_order=? WHERE id=?;", (n_so, item_id))
+        await self.conn.execute("UPDATE cheat_items SET sort_order=? WHERE id=?;", (so, n_id))
         await self.conn.commit()
