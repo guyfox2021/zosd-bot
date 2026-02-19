@@ -205,9 +205,13 @@ async def add_item_content(message: Message, state: FSMContext, db: Database, co
 # ---- 1) edit_item (ДОЛЖНО БЫТЬ ВЫШЕ item:)
 @r.callback_query(F.data.startswith("admin:cheat:edit_item:"))
 async def edit_item_start(call: CallbackQuery, state: FSMContext, db: Database, config: Config):
+
+    print("🔥 CALLBACK RECEIVED:", call.data)
+
     if not is_admin(call.from_user.id, config):
         await call.answer("Немає доступу", show_alert=True)
         return
+
 
     item_id = int(call.data.split(":")[-1])
     it = await db.get_item(item_id)
