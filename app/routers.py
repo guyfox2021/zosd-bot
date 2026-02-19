@@ -7,7 +7,10 @@ from app.handlers.admin_panel import r as admin_panel_router
 from app.handlers.admin_reply import r as admin_reply_router
 from app.handlers.admin_broadcast import r as admin_broadcast_router
 from app.handlers.admin_cheatsheet import r as admin_cheat_router
+from app.handlers._debug_any_callback import r as debug_any_callback_router
 
+
+router.include_router(debug_any_callback_router)
 router = Router()
 router.include_router(user_start_router)
 router.include_router(user_ticket_router)
