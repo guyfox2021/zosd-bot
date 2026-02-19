@@ -18,9 +18,9 @@ class Database:
             self.conn = None
 
     async def init(self):
-        assert self.conn is not None
+        if self.conn is None:
+            await self.connect()
 
-        # Users
         await self.conn.execute(
             """CREATE TABLE IF NOT EXISTS users(
                 user_id INTEGER PRIMARY KEY,
@@ -28,7 +28,6 @@ class Database:
             );"""
         )
 
-        # Tickets
         await self.conn.execute(
             """CREATE TABLE IF NOT EXISTS tickets(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +40,6 @@ class Database:
             );"""
         )
 
-        # Cheatsheet sections & items
         await self.conn.execute(
             """CREATE TABLE IF NOT EXISTS cheat_sections(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,14 +60,10 @@ class Database:
 
         await self.conn.commit()
 
-        # Seed minimal cheatsheet if empty
         cur = await self.conn.execute("SELECT COUNT(*) AS c FROM cheat_sections;")
         row = await cur.fetchone()
         if row["c"] == 0:
-            await self.conn.execute(
-                "INSERT INTO cheat_sections(title, sort_order) VALUES (?, ?);",
-                ("Приклад розділу", 0),
-            )
+            await self.conn.execute("INSERT INTO cheat_sections(title, sort_order) VALUES (?, ?);", ("Приклад розділу", 0))
             cur2 = await self.conn.execute("SELECT id FROM cheat_sections LIMIT 1;")
             sec = await cur2.fetchone()
             await self.conn.execute(
@@ -78,12 +72,13 @@ class Database:
             )
             await self.conn.commit()
 
-    # --- Users ---
+        await self.normalize_section_orders()
+        for s in await self.list_sections():
+            await self.normalize_item_orders(int(s["id"]))
+
     async def upsert_user(self, user_id: int):
         assert self.conn is not None
-        await self.conn.execute(
-            "INSERT OR IGNORE INTO users(user_id) VALUES (?);", (user_id,)
-        )
+        await self.conn.execute("INSERT OR IGNORE INTO users(user_id) VALUES (?);", (user_id,))
         await self.conn.commit()
 
     async def list_users(self) -> list[int]:
@@ -92,21 +87,15 @@ class Database:
         rows = await cur.fetchall()
         return [int(r["user_id"]) for r in rows]
 
-    # --- Tickets ---
     async def create_ticket(self, user_id: int, text: str) -> int:
         assert self.conn is not None
-        cur = await self.conn.execute(
-            "INSERT INTO tickets(user_id, text) VALUES(?, ?);",
-            (user_id, text),
-        )
+        cur = await self.conn.execute("INSERT INTO tickets(user_id, text) VALUES(?, ?);", (user_id, text))
         await self.conn.commit()
         return int(cur.lastrowid)
 
     async def get_ticket(self, ticket_id: int):
         assert self.conn is not None
-        cur = await self.conn.execute(
-            "SELECT * FROM tickets WHERE id = ?;", (ticket_id,)
-        )
+        cur = await self.conn.execute("SELECT * FROM tickets WHERE id = ?;", (ticket_id,))
         return await cur.fetchone()
 
     async def answer_ticket(self, ticket_id: int, answer_text: str):
@@ -119,12 +108,9 @@ class Database:
         )
         await self.conn.commit()
 
-    # --- Cheatsheet (user) ---
     async def list_sections(self):
         assert self.conn is not None
-        cur = await self.conn.execute(
-            "SELECT * FROM cheat_sections ORDER BY sort_order, id;"
-        )
+        cur = await self.conn.execute("SELECT * FROM cheat_sections ORDER BY sort_order, id;")
         return await cur.fetchall()
 
     async def list_items(self, section_id: int):
@@ -137,26 +123,19 @@ class Database:
 
     async def get_item(self, item_id: int):
         assert self.conn is not None
-        cur = await self.conn.execute(
-            "SELECT * FROM cheat_items WHERE id=?;", (item_id,)
-        )
+        cur = await self.conn.execute("SELECT * FROM cheat_items WHERE id=?;", (item_id,))
         return await cur.fetchone()
 
-    # --- Cheatsheet (admin) ---
     async def create_section(self, title: str):
         assert self.conn is not None
-        await self.conn.execute(
-            "INSERT INTO cheat_sections(title, sort_order) VALUES(?, 0);",
-            (title,),
-        )
+        cur = await self.conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM cheat_sections;")
+        row = await cur.fetchone()
+        await self.conn.execute("INSERT INTO cheat_sections(title, sort_order) VALUES(?, ?);", (title, int(row["n"])))
         await self.conn.commit()
 
     async def rename_section(self, section_id: int, title: str):
         assert self.conn is not None
-        await self.conn.execute(
-            "UPDATE cheat_sections SET title=? WHERE id=?;",
-            (title, section_id),
-        )
+        await self.conn.execute("UPDATE cheat_sections SET title=? WHERE id=?;", (title, section_id))
         await self.conn.commit()
 
     async def delete_section(self, section_id: int):
@@ -166,18 +145,20 @@ class Database:
 
     async def create_item(self, section_id: int, title: str, content: str):
         assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM cheat_items WHERE section_id=?;",
+            (section_id,),
+        )
+        row = await cur.fetchone()
         await self.conn.execute(
-            "INSERT INTO cheat_items(section_id, title, content, sort_order) VALUES(?,?,?,0);",
-            (section_id, title, content),
+            "INSERT INTO cheat_items(section_id, title, content, sort_order) VALUES(?,?,?,?);",
+            (section_id, title, content, int(row["n"])),
         )
         await self.conn.commit()
 
     async def update_item(self, item_id: int, title: str, content: str):
         assert self.conn is not None
-        await self.conn.execute(
-            "UPDATE cheat_items SET title=?, content=? WHERE id=?;",
-            (title, content, item_id),
-        )
+        await self.conn.execute("UPDATE cheat_items SET title=?, content=? WHERE id=?;", (title, content, item_id))
         await self.conn.commit()
 
     async def delete_item(self, item_id: int):
@@ -185,64 +166,56 @@ class Database:
         await self.conn.execute("DELETE FROM cheat_items WHERE id=?;", (item_id,))
         await self.conn.commit()
 
-    # --- Ordering: items (within section) ---
-    async def normalize_item_orders(self, section_id: int):
-        """Выровнять sort_order для пунктов раздела: 0..N по текущей сортировке."""
+    async def normalize_section_orders(self):
         assert self.conn is not None
-        cur = await self.conn.execute(
-            "SELECT id FROM cheat_items WHERE section_id=? ORDER BY sort_order, id;",
-            (section_id,),
-        )
+        cur = await self.conn.execute("SELECT id FROM cheat_sections ORDER BY sort_order, id;")
         rows = await cur.fetchall()
-        for i, r in enumerate(rows):
-            await self.conn.execute(
-                "UPDATE cheat_items SET sort_order=? WHERE id=?;",
-                (i, int(r["id"])),
-            )
+        for idx, r in enumerate(rows):
+            await self.conn.execute("UPDATE cheat_sections SET sort_order=? WHERE id=?;", (idx, int(r["id"])))
+        await self.conn.commit()
+
+    async def normalize_item_orders(self, section_id: int):
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT id FROM cheat_items WHERE section_id=? ORDER BY sort_order, id;", (section_id,))
+        rows = await cur.fetchall()
+        for idx, r in enumerate(rows):
+            await self.conn.execute("UPDATE cheat_items SET sort_order=? WHERE id=?;", (idx, int(r["id"])))
+        await self.conn.commit()
+
+    async def move_section(self, section_id: int, direction: str):
+        assert self.conn is not None
+        await self.normalize_section_orders()
+        cur = await self.conn.execute("SELECT id FROM cheat_sections ORDER BY sort_order, id;")
+        rows = await cur.fetchall()
+        ids = [int(r["id"]) for r in rows]
+        if section_id not in ids:
+            return
+        i = ids.index(section_id)
+        if direction == "up" and i > 0:
+            ids[i - 1], ids[i] = ids[i], ids[i - 1]
+        elif direction == "down" and i < len(ids) - 1:
+            ids[i + 1], ids[i] = ids[i], ids[i + 1]
+        else:
+            return
+        for order, sid in enumerate(ids):
+            await self.conn.execute("UPDATE cheat_sections SET sort_order=? WHERE id=?;", (order, sid))
         await self.conn.commit()
 
     async def move_item(self, item_id: int, section_id: int, direction: str):
-        """
-        direction: 'up' | 'down'
-        Меняем местами sort_order с соседним пунктом в этом же разделе.
-        """
         assert self.conn is not None
-
-        cur = await self.conn.execute(
-            "SELECT id, sort_order FROM cheat_items WHERE id=? AND section_id=?;",
-            (item_id, section_id),
-        )
-        row = await cur.fetchone()
-        if not row:
+        await self.normalize_item_orders(section_id)
+        cur = await self.conn.execute("SELECT id FROM cheat_items WHERE section_id=? ORDER BY sort_order, id;", (section_id,))
+        rows = await cur.fetchall()
+        ids = [int(r["id"]) for r in rows]
+        if item_id not in ids:
             return
-
-        so = int(row["sort_order"])
-
-        if direction == "up":
-            cur2 = await self.conn.execute(
-                """SELECT id, sort_order FROM cheat_items
-                   WHERE section_id=? AND sort_order < ?
-                   ORDER BY sort_order DESC, id DESC
-                   LIMIT 1;""",
-                (section_id, so),
-            )
+        i = ids.index(item_id)
+        if direction == "up" and i > 0:
+            ids[i - 1], ids[i] = ids[i], ids[i - 1]
+        elif direction == "down" and i < len(ids) - 1:
+            ids[i + 1], ids[i] = ids[i], ids[i + 1]
         else:
-            cur2 = await self.conn.execute(
-                """SELECT id, sort_order FROM cheat_items
-                   WHERE section_id=? AND sort_order > ?
-                   ORDER BY sort_order ASC, id ASC
-                   LIMIT 1;""",
-                (section_id, so),
-            )
-
-        neigh = await cur2.fetchone()
-        if not neigh:
             return
-
-        n_id = int(neigh["id"])
-        n_so = int(neigh["sort_order"])
-
-        # swap
-        await self.conn.execute("UPDATE cheat_items SET sort_order=? WHERE id=?;", (n_so, item_id))
-        await self.conn.execute("UPDATE cheat_items SET sort_order=? WHERE id=?;", (so, n_id))
+        for order, iid in enumerate(ids):
+            await self.conn.execute("UPDATE cheat_items SET sort_order=? WHERE id=?;", (order, iid))
         await self.conn.commit()

@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 
 from app.config import Config
@@ -11,16 +13,18 @@ from app.keyboards.admin import (
     cheat_admin_section_actions_kb,
     cheat_admin_item_actions_kb,
     confirm_delete_kb,
+    cheat_admin_done_kb,
 )
 
 r = Router()
 
+CONTENT_JOIN = "\n\n———\n\n"
 
-def _split_text(text: str, limit: int = 3500) -> list[str]:
-    """Разбиваем длинный текст на части, чтобы Telegram не резал сообщение."""
+
+def _split_for_tg(text: str, limit: int = 3500) -> list[str]:
     if not text:
         return [""]
-    parts = []
+    parts: list[str] = []
     cur = ""
     for line in text.splitlines(True):
         if len(cur) + len(line) > limit:
@@ -32,8 +36,12 @@ def _split_text(text: str, limit: int = 3500) -> list[str]:
     return parts
 
 
+def _norm(text: str) -> str:
+    return (text or "").strip()
+
+
 # =========================
-# HOME / SECTIONS
+# SECTIONS
 # =========================
 
 @r.callback_query(F.data == "admin:cheat")
@@ -42,10 +50,7 @@ async def cheat_home(call: CallbackQuery, db: Database, config: Config):
         await call.answer("Немає доступу", show_alert=True)
         return
     sections = await db.list_sections()
-    await call.message.edit_text(
-        "🛠 Редагування шпаргалки — розділи:",
-        reply_markup=cheat_admin_sections_kb(sections),
-    )
+    await call.message.edit_text("🛠 Редагування шпаргалки — розділи:", reply_markup=cheat_admin_sections_kb(sections))
     await call.answer()
 
 
@@ -55,7 +60,7 @@ async def add_section(call: CallbackQuery, state: FSMContext, config: Config):
         await call.answer("Немає доступу", show_alert=True)
         return
     await state.set_state(AdminCheat.creating_section)
-    await call.message.reply("Введіть назву нового розділу:")
+    await call.message.answer("Введіть назву нового розділу:")
     await call.answer()
 
 
@@ -64,15 +69,13 @@ async def add_section_text(message: Message, state: FSMContext, db: Database, co
     if not is_admin(message.from_user.id, config):
         await state.clear()
         return
-
     title = message.text.strip()
     if len(title) < 2:
-        await message.answer("Занадто коротко. Введіть нормальну назву.")
+        await message.answer("Занадто коротко.")
         return
-
     await db.create_section(title)
+    await db.normalize_section_orders()
     await state.clear()
-
     sections = await db.list_sections()
     await message.answer("✅ Розділ додано.", reply_markup=cheat_admin_sections_kb(sections))
 
@@ -84,11 +87,22 @@ async def open_section(call: CallbackQuery, db: Database, config: Config):
         return
     section_id = int(call.data.split(":")[-1])
     items = await db.list_items(section_id)
-    await call.message.edit_text(
-        f"📁 Розділ #{section_id}. Пункти:",
-        reply_markup=cheat_admin_section_actions_kb(section_id, items),
-    )
+    await call.message.edit_text(f"📁 Розділ #{section_id}. Пункти:", reply_markup=cheat_admin_section_actions_kb(section_id, items))
     await call.answer()
+
+
+@r.callback_query(F.data.startswith("admin:cheat:sec_move:"))
+async def move_section(call: CallbackQuery, db: Database, config: Config):
+    if not is_admin(call.from_user.id, config):
+        await call.answer("Немає доступу", show_alert=True)
+        return
+    parts = call.data.split(":")
+    direction = parts[-2]  # up/down
+    section_id = int(parts[-1])
+    await db.move_section(section_id, direction)
+    sections = await db.list_sections()
+    await call.message.edit_text("🛠 Редагування шпаргалки — розділи:", reply_markup=cheat_admin_sections_kb(sections))
+    await call.answer("✅ Переміщено")
 
 
 @r.callback_query(F.data.startswith("admin:cheat:rename_section:"))
@@ -99,7 +113,7 @@ async def rename_section_start(call: CallbackQuery, state: FSMContext, config: C
     section_id = int(call.data.split(":")[-1])
     await state.set_state(AdminCheat.renaming_section)
     await state.update_data(section_id=section_id)
-    await call.message.reply(f"Введіть нову назву для розділу #{section_id}:")
+    await call.message.answer(f"Введіть нову назву для розділу #{section_id}:")
     await call.answer()
 
 
@@ -108,23 +122,16 @@ async def rename_section_do(message: Message, state: FSMContext, db: Database, c
     if not is_admin(message.from_user.id, config):
         await state.clear()
         return
-
     data = await state.get_data()
     section_id = int(data["section_id"])
     title = message.text.strip()
-
     if len(title) < 2:
         await message.answer("Занадто коротко.")
         return
-
     await db.rename_section(section_id, title)
     await state.clear()
-
     items = await db.list_items(section_id)
-    await message.answer(
-        f"✅ Перейменовано.\n📁 Розділ #{section_id}.",
-        reply_markup=cheat_admin_section_actions_kb(section_id, items),
-    )
+    await message.answer(f"✅ Перейменовано.\n📁 Розділ #{section_id}.", reply_markup=cheat_admin_section_actions_kb(section_id, items))
 
 
 @r.callback_query(F.data.startswith("admin:cheat:del_section:"))
@@ -133,11 +140,8 @@ async def del_section_confirm(call: CallbackQuery, config: Config):
         await call.answer("Немає доступу", show_alert=True)
         return
     section_id = int(call.data.split(":")[-1])
-    kb = confirm_delete_kb(
-        confirm_cb=f"admin:cheat:del_section_yes:{section_id}",
-        cancel_cb="admin:cheat",
-    )
-    await call.message.reply(f"Точно видалити розділ #{section_id} (і всі пункти)?", reply_markup=kb)
+    kb = confirm_delete_kb(confirm_cb=f"admin:cheat:del_section_yes:{section_id}", cancel_cb="admin:cheat")
+    await call.message.answer(f"Точно видалити розділ #{section_id} (і всі пункти)?", reply_markup=kb)
     await call.answer()
 
 
@@ -148,13 +152,14 @@ async def del_section_do(call: CallbackQuery, db: Database, config: Config):
         return
     section_id = int(call.data.split(":")[-1])
     await db.delete_section(section_id)
+    await db.normalize_section_orders()
     sections = await db.list_sections()
-    await call.message.reply("🗑 Видалено.", reply_markup=cheat_admin_sections_kb(sections))
+    await call.message.answer("🗑 Видалено.", reply_markup=cheat_admin_sections_kb(sections))
     await call.answer()
 
 
 # =========================
-# ITEMS (ВАЖНО: порядок!)
+# ITEMS
 # =========================
 
 @r.callback_query(F.data.startswith("admin:cheat:add_item:"))
@@ -165,7 +170,7 @@ async def add_item_start(call: CallbackQuery, state: FSMContext, config: Config)
     section_id = int(call.data.split(":")[-1])
     await state.set_state(AdminCheat.creating_item_title)
     await state.update_data(section_id=section_id)
-    await call.message.reply(f"Введіть назву пункту для розділу #{section_id}:")
+    await call.message.answer(f"Введіть назву пункту для розділу #{section_id}:")
     await call.answer()
 
 
@@ -176,49 +181,101 @@ async def add_item_title(message: Message, state: FSMContext, config: Config):
         return
     title = message.text.strip()
     if len(title) < 2:
-        await message.answer("Занадто коротко. Введіть нормальну назву.")
+        await message.answer("Занадто коротко.")
         return
-    await state.update_data(item_title=title)
+    await state.update_data(item_title=title, content_parts=[])
     await state.set_state(AdminCheat.creating_item_content)
-    await message.answer("Тепер введіть текст (контент) цього пункту:")
+    await message.answer(
+        "Надсилайте текст пункту (можна кількома повідомленнями).\nКоли закінчите — натисніть ✅ Готово.",
+        reply_markup=cheat_admin_done_kb(),
+    )
 
 
 @r.message(AdminCheat.creating_item_content, F.text)
-async def add_item_content(message: Message, state: FSMContext, db: Database, config: Config):
+async def add_item_content_part(message: Message, state: FSMContext, config: Config):
     if not is_admin(message.from_user.id, config):
         await state.clear()
         return
+    part = _norm(message.text)
+    if not part:
+        return
+    data = await state.get_data()
+    parts = list(data.get("content_parts", []))
+    parts.append(part)
+    await state.update_data(content_parts=parts)
+    await message.answer(f"➕ Додано частину ({len(parts)}). Натисніть ✅ Готово коли завершите.")
 
+
+@r.message(AdminCheat.creating_item_content)
+async def add_item_content_nontext(message: Message):
+    await message.answer("Поки що приймаю лише текст 🙂")
+
+
+@r.message(AdminCheat.creating_item_content, F.text == "✅ Готово")
+async def add_item_finish(message: Message, state: FSMContext, db: Database, config: Config):
+    if not is_admin(message.from_user.id, config):
+        await state.clear()
+        return
     data = await state.get_data()
     section_id = int(data["section_id"])
     title = str(data["item_title"])
-    content = message.text.strip()
-
+    parts = list(data.get("content_parts", []))
+    content = CONTENT_JOIN.join([p for p in parts if p.strip()]).strip()
+    if len(content) < 2:
+        await message.answer("Контент порожній.")
+        return
     await db.create_item(section_id, title, content)
     await db.normalize_item_orders(section_id)
-
     await state.clear()
     items = await db.list_items(section_id)
     await message.answer("✅ Пункт додано.", reply_markup=cheat_admin_section_actions_kb(section_id, items))
+    await message.answer("Готово ✅", reply_markup=ReplyKeyboardRemove())
 
 
-# ---- 1) edit_item (ДОЛЖНО БЫТЬ ВЫШЕ item:)
-@r.callback_query(F.data.startswith("admin:cheat:edit_item:"))
-async def edit_item_start(call: CallbackQuery, state: FSMContext, db: Database, config: Config):
-
-    print("🔥 CALLBACK RECEIVED:", call.data)
-
+@r.callback_query(F.data.startswith("admin:cheat:item_move:"))
+async def move_item(call: CallbackQuery, db: Database, config: Config):
     if not is_admin(call.from_user.id, config):
         await call.answer("Немає доступу", show_alert=True)
         return
+    parts = call.data.split(":")
+    direction = parts[-3]  # up/down
+    item_id = int(parts[-2])
+    section_id = int(parts[-1])
+    await db.move_item(item_id, section_id, direction)
+    items = await db.list_items(section_id)
+    await call.message.edit_text(f"📁 Розділ #{section_id}. Пункти:", reply_markup=cheat_admin_section_actions_kb(section_id, items))
+    await call.answer("✅ Переміщено")
 
 
+@r.callback_query(F.data.startswith("admin:cheat:item:"))
+async def open_item(call: CallbackQuery, db: Database, config: Config):
+    if not is_admin(call.from_user.id, config):
+        await call.answer("Немає доступу", show_alert=True)
+        return
     item_id = int(call.data.split(":")[-1])
     it = await db.get_item(item_id)
     if not it:
         await call.answer("Не знайдено", show_alert=True)
         return
+    section_id = int(it["section_id"])
+    await call.message.answer(f"📄 <b>{it['title']}</b>")
+    for part in _split_for_tg(str(it["content"]), 3500):
+        if part.strip():
+            await call.message.answer(part)
+    await call.message.answer("Керування пунктом:", reply_markup=cheat_admin_item_actions_kb(item_id, section_id))
+    await call.answer()
 
+
+@r.callback_query(F.data.startswith("admin:cheat:edit:"))
+async def edit_item_start(call: CallbackQuery, state: FSMContext, db: Database, config: Config):
+    if not is_admin(call.from_user.id, config):
+        await call.answer("Немає доступу", show_alert=True)
+        return
+    item_id = int(call.data.split(":")[-1])
+    it = await db.get_item(item_id)
+    if not it:
+        await call.answer("Не знайдено", show_alert=True)
+        return
     await state.set_state(AdminCheat.editing_item_title)
     await state.update_data(item_id=item_id, section_id=int(it["section_id"]))
     await call.message.answer(f"✏️ Введіть нову назву пункту (зараз: {it['title']}):")
@@ -230,81 +287,60 @@ async def edit_item_title(message: Message, state: FSMContext, config: Config):
     if not is_admin(message.from_user.id, config):
         await state.clear()
         return
-
     title = message.text.strip()
     if len(title) < 2:
         await message.answer("Занадто коротко.")
         return
-
-    await state.update_data(new_title=title)
+    await state.update_data(new_title=title, edit_parts=[])
     await state.set_state(AdminCheat.editing_item_content)
-    await message.answer("Введіть новий текст (контент) пункту:")
+    await message.answer(
+        "Надсилайте новий контент (можна кількома повідомленнями).\nКоли закінчите — натисніть ✅ Готово.",
+        reply_markup=cheat_admin_done_kb(),
+    )
 
 
 @r.message(AdminCheat.editing_item_content, F.text)
-async def edit_item_content(message: Message, state: FSMContext, db: Database, config: Config):
+async def edit_item_content_part(message: Message, state: FSMContext, config: Config):
     if not is_admin(message.from_user.id, config):
         await state.clear()
         return
+    if message.text == "✅ Готово":
+        return
+    part = _norm(message.text)
+    if not part:
+        return
+    data = await state.get_data()
+    parts = list(data.get("edit_parts", []))
+    parts.append(part)
+    await state.update_data(edit_parts=parts)
+    await message.answer(f"➕ Додано частину ({len(parts)}). Натисніть ✅ Готово коли завершите.")
 
+
+@r.message(AdminCheat.editing_item_content, F.text == "✅ Готово")
+async def edit_item_finish(message: Message, state: FSMContext, db: Database, config: Config):
+    if not is_admin(message.from_user.id, config):
+        await state.clear()
+        return
     data = await state.get_data()
     item_id = int(data["item_id"])
     section_id = int(data["section_id"])
     title = str(data["new_title"])
-    content = message.text.strip()
-
+    parts = list(data.get("edit_parts", []))
+    content = CONTENT_JOIN.join([p for p in parts if p.strip()]).strip()
+    if len(content) < 2:
+        await message.answer("Контент порожній.")
+        return
     await db.update_item(item_id, title, content)
     await db.normalize_item_orders(section_id)
-
     await state.clear()
-    await message.answer("✅ Оновлено.")
-
-
-# ---- 2) move item (ДОЛЖНО БЫТЬ ВЫШЕ item:)
-@r.callback_query(F.data.startswith("admin:cheat:item_move:"))
-async def item_move(call: CallbackQuery, db: Database, config: Config):
-    if not is_admin(call.from_user.id, config):
-        await call.answer("Немає доступу", show_alert=True)
-        return
-
-    # admin:cheat:item_move:up:55:12
-    parts = call.data.split(":")
-    direction = parts[-3]  # up/down
-    item_id = int(parts[-2])
-    section_id = int(parts[-1])
-
-    await db.move_item(item_id, section_id, "up" if direction == "up" else "down")
-    await call.answer("✅ Переміщено")
-
-
-# ---- 3) open item (ПОСЛЕ edit/move)
-@r.callback_query(F.data.startswith("admin:cheat:item:"))
-async def open_item(call: CallbackQuery, db: Database, config: Config):
-    if not is_admin(call.from_user.id, config):
-        await call.answer("Немає доступу", show_alert=True)
-        return
-
-    item_id = int(call.data.split(":")[-1])
+    await message.answer("✅ Оновлено.", reply_markup=ReplyKeyboardRemove())
     it = await db.get_item(item_id)
-    if not it:
-        await call.answer("Не знайдено", show_alert=True)
-        return
-
-    section_id = int(it["section_id"])
-    title = str(it["title"])
-    content = str(it["content"])
-
-    # Отправляем контент кусками (если длинный), потом отдельное сообщение с кнопками.
-    await call.message.answer(f"📄 <b>{title}</b>")
-    for part in _split_text(content, 3500):
-        if part.strip():
-            await call.message.answer(part)
-
-    await call.message.answer(
-        "Керування пунктом:",
-        reply_markup=cheat_admin_item_actions_kb(item_id, section_id),
-    )
-    await call.answer()
+    if it:
+        await message.answer(f"📄 <b>{it['title']}</b>")
+        for part in _split_for_tg(str(it["content"]), 3500):
+            if part.strip():
+                await message.answer(part)
+        await message.answer("Керування пунктом:", reply_markup=cheat_admin_item_actions_kb(item_id, section_id))
 
 
 @r.callback_query(F.data.startswith("admin:cheat:del_item:"))
@@ -312,16 +348,11 @@ async def del_item_confirm(call: CallbackQuery, config: Config):
     if not is_admin(call.from_user.id, config):
         await call.answer("Немає доступу", show_alert=True)
         return
-
     parts = call.data.split(":")
     item_id = int(parts[-2])
     section_id = int(parts[-1])
-
-    kb = confirm_delete_kb(
-        confirm_cb=f"admin:cheat:del_item_yes:{item_id}:{section_id}",
-        cancel_cb=f"admin:cheat:item:{item_id}",
-    )
-    await call.message.reply("Точно видалити цей пункт?", reply_markup=kb)
+    kb = confirm_delete_kb(confirm_cb=f"admin:cheat:del_item_yes:{item_id}:{section_id}", cancel_cb=f"admin:cheat:sec:{section_id}")
+    await call.message.answer("Точно видалити цей пункт?", reply_markup=kb)
     await call.answer()
 
 
@@ -330,14 +361,11 @@ async def del_item_do(call: CallbackQuery, db: Database, config: Config):
     if not is_admin(call.from_user.id, config):
         await call.answer("Немає доступу", show_alert=True)
         return
-
     parts = call.data.split(":")
     item_id = int(parts[-2])
     section_id = int(parts[-1])
-
     await db.delete_item(item_id)
     await db.normalize_item_orders(section_id)
-
     items = await db.list_items(section_id)
-    await call.message.reply("🗑 Видалено.", reply_markup=cheat_admin_section_actions_kb(section_id, items))
+    await call.message.answer("🗑 Видалено.", reply_markup=cheat_admin_section_actions_kb(section_id, items))
     await call.answer()
