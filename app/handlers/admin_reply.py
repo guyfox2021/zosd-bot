@@ -10,7 +10,7 @@ from app.utils import is_admin
 r = Router()
 
 
-@r.callback_query(F.data.startswith("ticket:reply:"))
+@r.callback_query(F.data.startswith("admin:reply:"))
 async def start_reply(call: CallbackQuery, state: FSMContext, db: Database, config: Config):
     if not is_admin(call.from_user.id, config):
         await call.answer("Немає доступу", show_alert=True)

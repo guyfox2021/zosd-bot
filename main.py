@@ -18,7 +18,7 @@ async def main():
     db = Database(config.db_path)
     await db.connect()   # ✅ create connection first
     await db.init()      # ✅ create tables / seed
-    await db.normalize_section_orders()
+# await db.normalize_section_orders()
 
 
     bot = Bot(
@@ -27,6 +27,9 @@ async def main():
     )
 
     dp = Dispatcher()
+    from app.handlers._debug_mw import DebugUpdatesMiddleware
+    dp.update.outer_middleware(DebugUpdatesMiddleware())
+
     dp["db"] = db
     dp["config"] = config
 

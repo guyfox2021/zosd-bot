@@ -1,0 +1,28 @@
+venv/
+.env
+bot.db
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.DS_Store
+
+# --- runtime / secrets ---
+.env
+.env.*
+bot.db
+*.db
+*.sqlite
+*.sqlite3
+
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- venv ---
+venv/
+
+# --- logs ---
+*.log
+bot.db

@@ -17,3 +17,6 @@ router.include_router(admin_panel_router)
 router.include_router(admin_reply_router)
 router.include_router(admin_broadcast_router)
 router.include_router(admin_cheat_router)
+
+from app.handlers._debug_any_callback import r as debug_any_callback_router
+router.include_router(debug_any_callback_router)

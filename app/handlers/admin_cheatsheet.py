@@ -270,7 +270,14 @@ async def item_move(call: CallbackQuery, db: Database, config: Config):
     section_id = int(parts[-1])
 
     await db.move_item(item_id, section_id, "up" if direction == "up" else "down")
-    await call.answer("✅ Переміщено")
+
+    items = await db.get_items(section_id)  # <-- замени на реальный метод из шага 1
+    await call.message.edit_reply_markup(
+    	reply_markup=cheat_admin_section_actions_kb(section_id, items)
+    )
+
+    await call.answer("⬆️ Пункт піднято" if direction == "up" else "⬇️ Пункт опущено")
+
 
 
 # ---- 3) open item (ПОСЛЕ edit/move)
