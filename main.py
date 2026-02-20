@@ -27,6 +27,9 @@ async def main():
     )
 
     dp = Dispatcher()
+    from app.middlewares.subscription import SubscriptionMiddleware
+    dp.update.outer_middleware(SubscriptionMiddleware())
+
     from app.handlers._debug_mw import DebugUpdatesMiddleware
     dp.update.outer_middleware(DebugUpdatesMiddleware())
 
