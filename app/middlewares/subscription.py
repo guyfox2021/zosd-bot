@@ -15,8 +15,8 @@ ALLOWED_STATUSES = {"member", "administrator", "creator"}
 
 class SubscriptionMiddleware(BaseMiddleware):
 
-    CHANNEL_USERNAME = "@your_channel"
-    CHANNEL_LINK = "https://t.me/your_channel"
+    CHANNEL_ID = -1003763247253
+    CHANNEL_LINK = "https://t.me/NADPSUfaculty4"
 
     CACHE_TTL = 60
 
@@ -75,7 +75,7 @@ class SubscriptionMiddleware(BaseMiddleware):
         try:
 
             member = await bot.get_chat_member(
-                self.CHANNEL_USERNAME,
+                self.CHANNEL_ID,
                 user_id,
             )
 
