@@ -41,7 +41,7 @@ async def admin_stats(call: CallbackQuery, db: Database, config: Config):
     average_per_active = round(total_tickets / ticket_authors, 2) if ticket_authors else 0
 
     lines = [
-        "📊 Статистика робочого бота:",
+        "📊 Статистика:",
         f"🔹 Зареєстрованих користувачів: {total_users}",
         f"🔹 Користувачів, які писали питання: {ticket_authors}",
         f"🔹 Всього звернень: {total_tickets}",
