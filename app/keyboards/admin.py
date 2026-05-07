@@ -10,6 +10,9 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     kb.row(
         InlineKeyboardButton(text="📣 Розсилка всім", callback_data="admin:broadcast"),
     )
+    kb.row(
+        InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats"),
+    )
     return kb.as_markup()
 
 

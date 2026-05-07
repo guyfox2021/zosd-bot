@@ -92,6 +92,55 @@ class Database:
         rows = await cur.fetchall()
         return [int(r["user_id"]) for r in rows]
 
+    async def count_users(self) -> int:
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM users;")
+        row = await cur.fetchone()
+        return int(row["c"])
+
+    async def count_tickets(self) -> int:
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM tickets;")
+        row = await cur.fetchone()
+        return int(row["c"])
+
+    async def count_tickets_by_status(self) -> dict[str, int]:
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT status, COUNT(*) AS c FROM tickets GROUP BY status;"
+        )
+        rows = await cur.fetchall()
+        return {str(r["status"]): int(r["c"]) for r in rows}
+
+    async def count_ticket_authors(self) -> int:
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT COUNT(DISTINCT user_id) AS c FROM tickets;"
+        )
+        row = await cur.fetchone()
+        return int(row["c"])
+
+    async def top_ticket_authors(self, limit: int = 5) -> list[tuple[int, int]]:
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT user_id, COUNT(*) AS c FROM tickets GROUP BY user_id ORDER BY c DESC LIMIT ?;",
+            (limit,),
+        )
+        rows = await cur.fetchall()
+        return [(int(r["user_id"]), int(r["c"])) for r in rows]
+
+    async def count_cheat_sections(self) -> int:
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM cheat_sections;")
+        row = await cur.fetchone()
+        return int(row["c"])
+
+    async def count_cheat_items(self) -> int:
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM cheat_items;")
+        row = await cur.fetchone()
+        return int(row["c"])
+
     # --- Tickets ---
     async def create_ticket(self, user_id: int, text: str) -> int:
         assert self.conn is not None
