@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from app.keyboards.user import main_menu_kb
 from aiogram import BaseMiddleware, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import (
@@ -10,13 +11,15 @@ from aiogram.exceptions import (
     TelegramNetworkError,
 )
 
+from app.handlers.user_start import send_welcome
+
 ALLOWED_STATUSES = {"member", "administrator", "creator"}
 
 
 class SubscriptionMiddleware(BaseMiddleware):
 
-    CHANNEL_USERNAME = "@your_channel"
-    CHANNEL_LINK = "https://t.me/your_channel"
+    CHANNEL_ID = -1003763247253
+    CHANNEL_LINK = "https://t.me/NADPSUfaculty4"
 
     CACHE_TTL = 60
 
@@ -75,7 +78,7 @@ class SubscriptionMiddleware(BaseMiddleware):
         try:
 
             member = await bot.get_chat_member(
-                self.CHANNEL_USERNAME,
+                self.CHANNEL_ID,
                 user_id,
             )
 
@@ -131,21 +134,21 @@ class SubscriptionMiddleware(BaseMiddleware):
                 ok = await self.check(bot, user.id)
 
                 if ok:
-
                     await event.answer("✅ Підписку підтверджено!")
 
+                    # убрать сообщение про подписку
                     if event.message:
-                        await event.message.edit_text(
-                            "✅ Доступ відкрито."
-                        )
-
-                    return await handler(event, data)
+                        try:
+                            await event.message.delete()
+                        except TelegramBadRequest:
+                            pass
+                    await send_welcome(bot, user.id, data.get('config'))
+                    return
 
                 await event.answer(
                     "❌ Ви ще не підписалися",
                     show_alert=True,
                 )
-
                 return
 
             ok = await self.check(bot, user.id)
