@@ -263,10 +263,19 @@ async def cheat_open_leadership_folder(call: CallbackQuery, db: Database):
     section_id = int(parts[-1])
 
     if folder == "faculty":
-        await call.message.edit_text(
-            "Керівництво факультету — оберіть прізвище:",
-            reply_markup=faculty_people_kb(section_id, source_item_id),
-        )
+        it = await db.get_item(source_item_id)
+        if not it:
+            await call.answer("Не знайдено", show_alert=True)
+            return
+
+        content = str(it["content"])
+        for slug in FACULTY_PEOPLE:
+            info = _extract_person_info(content, slug) or "Інформацію поки не додано."
+            await _send_faculty_card(call.message, slug, info)
+
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
+        await call.message.answer("—", reply_markup=kb.as_markup())
         await call.answer()
         return
 
