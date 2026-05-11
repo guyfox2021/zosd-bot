@@ -1,12 +1,35 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.db import Database
 
 r = Router()
+
+BOT_ROOT = Path(__file__).resolve().parents[2]
+FACULTY_PHOTO_DIR = BOT_ROOT / "Фото" / "Факультет"
+
+FACULTY_PEOPLE = {
+    "sobko": {
+        "label": "Собко",
+        "aliases": ("Собко",),
+        "photo": "Собко.jpg",
+    },
+    "vyshnevskyi": {
+        "label": "Вишневський",
+        "aliases": ("Вишневський", "Вишневский"),
+        "photo": "Вишневський.jpg",
+    },
+    "lazorenko": {
+        "label": "Лазоренко",
+        "aliases": ("Лазоренко",),
+        "photo": "Лазоренко.jpg",
+    },
+}
 
 
 def cheat_sections_kb(sections) -> InlineKeyboardMarkup:
@@ -29,6 +52,64 @@ def cheat_items_kb(section_id: int, items) -> InlineKeyboardMarkup:
     kb.adjust(1)
     kb.row(InlineKeyboardButton(text="⬅️ До розділів", callback_data="cheat:home"))
     return kb.as_markup()
+
+
+def faculty_people_kb(section_id: int, source_item_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for slug, person in FACULTY_PEOPLE.items():
+        kb.add(
+            InlineKeyboardButton(
+                text=str(person["label"]),
+                callback_data=f"cheat:faculty:{slug}:{source_item_id}:{section_id}",
+            )
+        )
+    kb.adjust(1)
+    kb.row(InlineKeyboardButton(text="⬅️ До розділів", callback_data="cheat:home"))
+    return kb.as_markup()
+
+
+def _person_positions(text: str) -> list[tuple[int, str]]:
+    lowered = text.casefold()
+    positions: list[tuple[int, str]] = []
+    for slug, person in FACULTY_PEOPLE.items():
+        found_positions = [
+            lowered.find(str(alias).casefold())
+            for alias in person["aliases"]
+            if lowered.find(str(alias).casefold()) >= 0
+        ]
+        if found_positions:
+            positions.append((min(found_positions), slug))
+    return sorted(positions)
+
+
+def _find_faculty_source_item(items):
+    for it in items:
+        title = str(it["title"])
+        content = str(it["content"])
+        combined = f"{title}\n{content}"
+        has_people = len(_person_positions(combined)) >= 2
+        has_faculty_title = "керівниц" in title.casefold() and "факульт" in title.casefold()
+        if has_people or has_faculty_title:
+            return it
+    return None
+
+
+def _extract_person_info(text: str, slug: str) -> str:
+    positions = _person_positions(text)
+    own_index = next((idx for idx, (_, person_slug) in enumerate(positions) if person_slug == slug), None)
+    if own_index is None:
+        return text.strip()
+
+    start = positions[own_index][0]
+    end = positions[own_index + 1][0] if own_index + 1 < len(positions) else len(text)
+    return text[start:end].strip()
+
+
+async def _send_faculty_photo(message: Message, slug: str):
+    photo_name = str(FACULTY_PEOPLE[slug]["photo"])
+    photo_path = FACULTY_PHOTO_DIR / photo_name
+    if photo_path.exists():
+        await message.answer_photo(FSInputFile(photo_path))
 
 
 def _split_long_text(text: str, max_len: int = 3500) -> list[str]:
@@ -78,7 +159,45 @@ async def cheat_home(call: CallbackQuery, db: Database):
 async def cheat_open_section(call: CallbackQuery, db: Database):
     section_id = int(call.data.split(":")[-1])
     items = await db.list_items(section_id)
+    faculty_source_item = _find_faculty_source_item(items)
+    if faculty_source_item:
+        await call.message.edit_text(
+            "Керівництво факультету — оберіть прізвище:",
+            reply_markup=faculty_people_kb(section_id, int(faculty_source_item["id"])),
+        )
+        await call.answer()
+        return
+
     await call.message.edit_text(f"📁 Розділ #{section_id}. Оберіть пункт:", reply_markup=cheat_items_kb(section_id, items))
+    await call.answer()
+
+
+@r.callback_query(F.data.startswith("cheat:faculty:"))
+async def cheat_open_faculty_person(call: CallbackQuery, db: Database):
+    # формат: cheat:faculty:{slug}:{source_item_id}:{section_id}
+    parts = call.data.split(":")
+    slug = parts[-3]
+    item_id = int(parts[-2])
+    section_id = int(parts[-1])
+
+    person = FACULTY_PEOPLE.get(slug)
+    it = await db.get_item(item_id)
+    if not person or not it:
+        await call.answer("Не знайдено", show_alert=True)
+        return
+
+    content = str(it["content"])
+    info = _extract_person_info(content, slug) or "Інформацію поки не додано."
+
+    await call.message.answer(f"<b>{person['label']}</b>")
+    for part in _split_long_text(info):
+        await call.message.answer(part)
+    await _send_faculty_photo(call.message, slug)
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="⬅️ Назад до керівництва", callback_data=f"cheat:sec:{section_id}"))
+    await call.message.answer("—", reply_markup=kb.as_markup())
+
     await call.answer()
 
 
@@ -102,6 +221,12 @@ async def cheat_open_item(call: CallbackQuery, db: Database):
 
     for p in _split_long_text(content):
         await call.message.answer(p)
+
+    for slug, person in FACULTY_PEOPLE.items():
+        aliases = tuple(str(alias).casefold() for alias in person["aliases"])
+        if any(alias in title.casefold() for alias in aliases):
+            await _send_faculty_photo(call.message, slug)
+            break
 
     # и даём кнопку назад (inline)
     kb = InlineKeyboardBuilder()
