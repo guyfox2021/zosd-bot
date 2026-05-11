@@ -10,6 +10,7 @@ from app.db import Database
 
 r = Router()
 
+TELEGRAM_PHOTO_CAPTION_LIMIT = 1024
 BOT_ROOT = Path(__file__).resolve().parents[2]
 FACULTY_PHOTO_DIR = BOT_ROOT / "Фото" / "Факультет"
 
@@ -105,11 +106,49 @@ def _extract_person_info(text: str, slug: str) -> str:
     return text[start:end].strip()
 
 
-async def _send_faculty_photo(message: Message, slug: str):
+def _strip_person_heading(text: str, slug: str) -> str:
+    stripped = text.strip()
+    lowered = stripped.casefold()
+    for alias in FACULTY_PEOPLE[slug]["aliases"]:
+        alias_text = str(alias)
+        if lowered.startswith(alias_text.casefold()):
+            rest = stripped[len(alias_text):].lstrip(" \n\r\t:-–—.,")
+            return rest.strip()
+    return stripped
+
+
+def _fit_photo_caption(text: str) -> tuple[str, str]:
+    if len(text) <= TELEGRAM_PHOTO_CAPTION_LIMIT:
+        return text, ""
+
+    cut = text.rfind("\n\n", 0, TELEGRAM_PHOTO_CAPTION_LIMIT)
+    if cut < 200:
+        cut = text.rfind("\n", 0, TELEGRAM_PHOTO_CAPTION_LIMIT)
+    if cut < 200:
+        cut = text.rfind(" ", 0, TELEGRAM_PHOTO_CAPTION_LIMIT)
+    if cut < 200:
+        cut = TELEGRAM_PHOTO_CAPTION_LIMIT
+
+    return text[:cut].strip(), text[cut:].strip()
+
+
+async def _send_faculty_card(message: Message, slug: str, info: str):
+    label = str(FACULTY_PEOPLE[slug]["label"])
+    body = _strip_person_heading(info, slug)
+    caption = f"<b>{label}</b>"
+    if body:
+        caption += f"\n\n{body}"
+
+    first_caption, rest = _fit_photo_caption(caption)
     photo_name = str(FACULTY_PEOPLE[slug]["photo"])
     photo_path = FACULTY_PHOTO_DIR / photo_name
     if photo_path.exists():
-        await message.answer_photo(FSInputFile(photo_path))
+        await message.answer_photo(FSInputFile(photo_path), caption=first_caption)
+    else:
+        await message.answer(first_caption)
+
+    for part in _split_long_text(rest):
+        await message.answer(part)
 
 
 def _split_long_text(text: str, max_len: int = 3500) -> list[str]:
@@ -189,10 +228,7 @@ async def cheat_open_faculty_person(call: CallbackQuery, db: Database):
     content = str(it["content"])
     info = _extract_person_info(content, slug) or "Інформацію поки не додано."
 
-    await call.message.answer(f"<b>{person['label']}</b>")
-    for part in _split_long_text(info):
-        await call.message.answer(part)
-    await _send_faculty_photo(call.message, slug)
+    await _send_faculty_card(call.message, slug, info)
 
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="⬅️ Назад до керівництва", callback_data=f"cheat:sec:{section_id}"))
@@ -216,17 +252,23 @@ async def cheat_open_item(call: CallbackQuery, db: Database):
     title = str(it["title"])
     content = str(it["content"])
 
+    for slug, person in FACULTY_PEOPLE.items():
+        aliases = tuple(str(alias).casefold() for alias in person["aliases"])
+        if any(alias in title.casefold() for alias in aliases):
+            await _send_faculty_card(call.message, slug, content)
+
+            kb = InlineKeyboardBuilder()
+            kb.row(InlineKeyboardButton(text="⬅️ Назад до пунктів", callback_data=f"cheat:sec:{section_id}"))
+            await call.message.answer("—", reply_markup=kb.as_markup())
+
+            await call.answer()
+            return
+
     # 👉 отправляем несколькими сообщениями
     await call.message.answer(f"📄 <b>{title}</b>")
 
     for p in _split_long_text(content):
         await call.message.answer(p)
-
-    for slug, person in FACULTY_PEOPLE.items():
-        aliases = tuple(str(alias).casefold() for alias in person["aliases"])
-        if any(alias in title.casefold() for alias in aliases):
-            await _send_faculty_photo(call.message, slug)
-            break
 
     # и даём кнопку назад (inline)
     kb = InlineKeyboardBuilder()
