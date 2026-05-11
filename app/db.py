@@ -28,6 +28,26 @@ class Database:
             );"""
         )
 
+        # Authorized users (for access control)
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS authorized_users(
+                user_id INTEGER PRIMARY KEY,
+                authorized_at TEXT DEFAULT (datetime('now'))
+            );"""
+        )
+
+        # One-time passwords
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS access_passwords(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                password TEXT UNIQUE NOT NULL,
+                used INTEGER DEFAULT 0,
+                used_by_user_id INTEGER,
+                created_at TEXT DEFAULT (datetime('now')),
+                used_at TEXT
+            );"""
+        )
+
         # Tickets
         await self.conn.execute(
             """CREATE TABLE IF NOT EXISTS tickets(
@@ -59,6 +79,17 @@ class Database:
                 FOREIGN KEY(section_id) REFERENCES cheat_sections(id) ON DELETE CASCADE
             );"""
         )
+        await self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS leadership_people(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_key TEXT NOT NULL,
+                full_name TEXT NOT NULL,
+                position TEXT NOT NULL,
+                rank TEXT NOT NULL,
+                photo_path TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            );"""
+        )
 
         await self.conn.commit()
 
@@ -77,6 +108,9 @@ class Database:
                 (sec["id"], "Приклад пункту", "Тут буде текст шпаргалки.", 0),
             )
             await self.conn.commit()
+
+        await self.seed_leadership_people()
+        await self.seed_access_passwords()
 
     # --- Users ---
     async def upsert_user(self, user_id: int):
@@ -141,6 +175,84 @@ class Database:
         row = await cur.fetchone()
         return int(row["c"])
 
+    # --- Access Control (Passwords) ---
+    async def authorize_user(self, user_id: int) -> None:
+        """Add user to authorized list."""
+        assert self.conn is not None
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO authorized_users(user_id) VALUES (?);",
+            (user_id,),
+        )
+        await self.conn.commit()
+
+    async def is_user_authorized(self, user_id: int) -> bool:
+        """Check if user is authorized."""
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT 1 FROM authorized_users WHERE user_id = ?;",
+            (user_id,),
+        )
+        return await cur.fetchone() is not None
+
+    async def check_and_use_password(self, password: str, user_id: int) -> bool:
+        """Check if password exists and unused. If valid, mark as used and authorize user."""
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT id FROM access_passwords WHERE password = ? AND used = 0;",
+            (password,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return False
+        
+        pwd_id = row["id"]
+        await self.conn.execute(
+            "UPDATE access_passwords SET used = 1, used_by_user_id = ?, used_at = datetime('now') WHERE id = ?;",
+            (user_id, pwd_id),
+        )
+        await self.authorize_user(user_id)
+        await self.conn.commit()
+        return True
+
+    async def get_unused_passwords_count(self) -> int:
+        """Count unused passwords."""
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT COUNT(*) AS c FROM access_passwords WHERE used = 0;"
+        )
+        row = await cur.fetchone()
+        return int(row["c"])
+
+    async def add_password(self, password: str) -> None:
+        """Add a new password."""
+        assert self.conn is not None
+        await self.conn.execute(
+            "INSERT INTO access_passwords(password) VALUES (?);",
+            (password,),
+        )
+        await self.conn.commit()
+
+    async def seed_access_passwords(self, total: int = 300) -> None:
+        """Create a stock of simple one-time access passwords if the table is empty."""
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM access_passwords;")
+        row = await cur.fetchone()
+        if int(row["c"]) > 0:
+            return
+
+        passwords = [(f"ZOSD-{i:03d}",) for i in range(1, total + 1)]
+        await self.conn.executemany(
+            "INSERT OR IGNORE INTO access_passwords(password) VALUES (?);",
+            passwords,
+        )
+        await self.conn.commit()
+
+    async def count_authorized_users(self) -> int:
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM authorized_users;")
+        row = await cur.fetchone()
+        return int(row["c"])
+
     # --- Tickets ---
     async def create_ticket(self, user_id: int, text: str) -> int:
         assert self.conn is not None
@@ -190,6 +302,70 @@ class Database:
             "SELECT * FROM cheat_items WHERE id=?;", (item_id,)
         )
         return await cur.fetchone()
+
+    # --- Leadership cards ---
+    async def seed_leadership_people(self):
+        assert self.conn is not None
+        cur = await self.conn.execute("SELECT COUNT(*) AS c FROM leadership_people;")
+        row = await cur.fetchone()
+        if int(row["c"]) > 0:
+            return
+
+        people = [
+            ("faculty", "СОБКО Вадим Григорович", "Начальник (декан) факультету забезпечення оперативно-службової діяльності", "Полковник", "Фото/Факультет/Собко.jpg", 0),
+            ("faculty", "ЛАЗОРЕНКО Олександр Васильович", "Заступник начальника (заступник декана) факультету забезпечення оперативно-службової діяльності з навчально-методичної роботи", "Полковник", "Фото/Факультет/Лазоренко.jpg", 1),
+            ("faculty", "ВИШНЕВСЬКИЙ Володимир Анатолійович", "Заступник начальника (заступник декана) факультету забезпечення оперативно-службової діяльності з морально-психологічного забезпечення", "Полковник", "Фото/Факультет/Вишневський.jpg", 2),
+            ("adpsu", "ВАВРИНЮК Валерій Павлович", "Тимчасово виконуючий  обов'язки Голови Державної прикордонної служби України", "Генерал-майор", "Фото/АДПСУ/ВАВРИНЮК.jpg", 0),
+            ("adpsu", "ЧЕНЧИК Вадим Миколайович", "Заступник Голови Державної прикордонної служби України", "Генерал-майор", "Фото/АДПСУ/ЧЕНЧИК.jpg", 1),
+            ("adpsu", "СЕРДЮК Сергій Іванович", "Заступник Голови Державної прикордонної служби України", "Генерал-майор", "Фото/АДПСУ/СЕРДЮК.jpg", 2),
+        ]
+        await self.conn.executemany(
+            """INSERT INTO leadership_people(group_key, full_name, position, rank, photo_path, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?);""",
+            people,
+        )
+        await self.conn.commit()
+
+    async def list_leadership_people(self, group_key: str):
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT * FROM leadership_people WHERE group_key=? ORDER BY sort_order, id;",
+            (group_key,),
+        )
+        return await cur.fetchall()
+
+    async def get_leadership_person(self, person_id: int):
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT * FROM leadership_people WHERE id=?;",
+            (person_id,),
+        )
+        return await cur.fetchone()
+
+    async def update_leadership_field(self, person_id: int, field: str, value: str):
+        assert self.conn is not None
+        allowed = {"full_name", "position", "rank", "photo_path"}
+        if field not in allowed:
+            raise ValueError("Invalid leadership field")
+        await self.conn.execute(
+            f"UPDATE leadership_people SET {field}=? WHERE id=?;",
+            (value, person_id),
+        )
+        await self.conn.commit()
+
+    async def create_leadership_person(self, group_key: str, full_name: str, position: str, rank: str, photo_path: str):
+        assert self.conn is not None
+        cur = await self.conn.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM leadership_people WHERE group_key=?;",
+            (group_key,),
+        )
+        row = await cur.fetchone()
+        await self.conn.execute(
+            """INSERT INTO leadership_people(group_key, full_name, position, rank, photo_path, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?);""",
+            (group_key, full_name, position, rank, photo_path, int(row["next_order"])),
+        )
+        await self.conn.commit()
 
     # --- Cheatsheet (admin) ---
     async def create_section(self, title: str):

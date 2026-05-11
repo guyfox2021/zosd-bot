@@ -30,6 +30,9 @@ async def main():
     from app.middlewares.subscription import SubscriptionMiddleware
     dp.update.outer_middleware(SubscriptionMiddleware())
 
+    from app.middlewares.access import AccessMiddleware
+    dp.update.outer_middleware(AccessMiddleware())
+
     from app.handlers._debug_mw import DebugUpdatesMiddleware
     dp.update.outer_middleware(DebugUpdatesMiddleware())
 

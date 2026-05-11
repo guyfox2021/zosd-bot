@@ -12,61 +12,11 @@ r = Router()
 
 TELEGRAM_PHOTO_CAPTION_LIMIT = 1024
 BOT_ROOT = Path(__file__).resolve().parents[2]
-FACULTY_PHOTO_DIR = BOT_ROOT / "Фото" / "Факультет"
-ADPSU_PHOTO_DIR = BOT_ROOT / "Фото" / "АДПСУ"
-
-FACULTY_PEOPLE = [
-    {
-        "slug": "sobko",
-        "label": "Собко",
-        "aliases": ("Собко",),
-        "full_name": "Собко Вадим Григорович",
-        "position": "Начальник (декан) факультету забезпечення оперативно-службової діяльності",
-        "rank": "Полковник",
-        "photo": "Собко.jpg",
-    },
-    {
-        "slug": "lazorenko",
-        "label": "Лазоренко",
-        "aliases": ("Лазоренко",),
-        "full_name": "Лазоренко Олександр Васильович",
-        "position": "Заступник начальника (заступник декана) факультету забезпечення оперативно-службової діяльності з навчально-методичної роботи",
-        "rank": "Полковник",
-        "photo": "Лазоренко.jpg",
-    },
-    {
-        "slug": "vyshnevskyi",
-        "label": "Вишневський",
-        "aliases": ("Вишневський", "Вишневский"),
-        "full_name": "Вишневський Володимир Анатолійович",
-        "position": "Заступник начальника (заступник декана) факультету забезпечення оперативно-службової діяльності з морально-психологічного забезпечення",
-        "rank": "Полковник",
-        "photo": "Вишневський.jpg",
-    },
-]
-
-FACULTY_PEOPLE_BY_SLUG = {person["slug"]: person for person in FACULTY_PEOPLE}
-
-ADPSU_PEOPLE = [
-    {
-        "full_name": "ВАВРИНЮК Валерій Павлович",
-        "position": "ТИМЧАСОВО ВИКОНУЮЧИЙ ОБОВ'ЯЗКИ ГОЛОВИ ДЕРЖАВНОЇ ПРИКОРДОННОЇ СЛУЖБИ УКРАЇНИ",
-        "rank": "генерал-майор",
-        "photo": "ВАВРИНЮК.jpg",
-    },
-    {
-        "full_name": "ЧЕНЧИК Вадим Миколайович",
-        "position": "Заступник Голови Державної прикордонної служби України",
-        "rank": "генерал-майор",
-        "photo": "ЧЕНЧИК.jpg",
-    },
-    {
-        "full_name": "СЕРДЮК Сергій Іванович",
-        "position": "Заступник Голови Державної прикордонної служби України",
-        "rank": "генерал-майор",
-        "photo": "СЕРДЮК.jpg",
-    },
-]
+LEADERSHIP_GROUP_LABELS = {
+    "faculty": "Факультету",
+    "nadpsu": "НАДПСУ",
+    "adpsu": "АДПСУ",
+}
 
 
 def cheat_sections_kb(sections) -> InlineKeyboardMarkup:
@@ -117,30 +67,20 @@ def leadership_folders_kb(section_id: int, source_item_id: int) -> InlineKeyboar
 
 
 def faculty_people_kb(section_id: int, source_item_id: int) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    for person in FACULTY_PEOPLE:
-        kb.add(
-            InlineKeyboardButton(
-                text=str(person["label"]),
-                callback_data=f"cheat:faculty:{person['slug']}:{source_item_id}:{section_id}",
-            )
-        )
-    kb.adjust(1)
-    kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
-    return kb.as_markup()
+    return leadership_folders_kb(section_id, source_item_id)
 
 
 def _person_positions(text: str) -> list[tuple[int, str]]:
     lowered = text.casefold()
     positions: list[tuple[int, str]] = []
-    for person in FACULTY_PEOPLE:
-        found_positions = [
-            lowered.find(str(alias).casefold())
-            for alias in person["aliases"]
-            if lowered.find(str(alias).casefold()) >= 0
-        ]
+    for slug, aliases in {
+        "sobko": ("Собко",),
+        "lazorenko": ("Лазоренко",),
+        "vyshnevskyi": ("Вишневський", "Вишневский"),
+    }.items():
+        found_positions = [lowered.find(alias.casefold()) for alias in aliases if lowered.find(alias.casefold()) >= 0]
         if found_positions:
-            positions.append((min(found_positions), str(person["slug"])))
+            positions.append((min(found_positions), slug))
     return sorted(positions)
 
 
@@ -186,14 +126,7 @@ def _extract_person_info(text: str, slug: str) -> str:
 
 
 def _strip_person_heading(text: str, slug: str) -> str:
-    stripped = text.strip()
-    lowered = stripped.casefold()
-    for alias in FACULTY_PEOPLE_BY_SLUG[slug]["aliases"]:
-        alias_text = str(alias)
-        if lowered.startswith(alias_text.casefold()):
-            rest = stripped[len(alias_text):].lstrip(" \n\r\t:-–—.,")
-            return rest.strip()
-    return stripped
+    return text.strip()
 
 
 def _fit_photo_caption(text: str) -> tuple[str, str]:
@@ -219,52 +152,14 @@ def _with_colonel_rank_at_bottom(text: str) -> str:
 
 
 def _format_faculty_info(slug: str, info: str) -> str:
-    text = info.strip()
-    open_pos = text.find("(")
-    close_pos = text.rfind(")")
-
-    position = ""
-    if open_pos >= 0 and close_pos > open_pos:
-        position = text[open_pos + 1 : close_pos].strip()
-        text = text[:open_pos].strip()
-
-    if text.casefold().startswith("полковник"):
-        text = text[len("Полковник") :].strip()
-
-    for alias in FACULTY_PEOPLE_BY_SLUG[slug]["aliases"]:
-        alias_text = str(alias)
-        if text.casefold().startswith(alias_text.casefold()):
-            text = text[len(alias_text) :].strip()
-            break
-
-    lines = []
-    if text:
-        lines.append(text)
-    if position:
-        lines.append(f"({position})")
-    lines.append("")
-    lines.append("Полковник")
-    return "\n".join(lines).strip()
+    return info.strip()
 
 
 def _parse_faculty_info(slug: str, info: str) -> tuple[str, str]:
-    text = info.strip()
-    open_pos = text.find("(")
-    close_pos = text.rfind(")")
-
-    position = ""
-    if open_pos >= 0 and close_pos > open_pos:
-        position = text[open_pos + 1 : close_pos].strip()
-        text = text[:open_pos].strip()
-
-    if text.casefold().startswith("полковник"):
-        text = text[len("Полковник") :].strip()
-
-    return text or str(FACULTY_PEOPLE_BY_SLUG[slug]["label"]), position
+    return info.strip(), ""
 
 
-async def _send_faculty_card(message: Message, slug: str, info: str):
-    person = FACULTY_PEOPLE_BY_SLUG[slug]
+async def _send_leadership_card(message: Message, person):
     full_name = str(person["full_name"])
     position = str(person["position"])
     caption = f"<b>{full_name}</b>"
@@ -273,25 +168,7 @@ async def _send_faculty_card(message: Message, slug: str, info: str):
     caption += f"\n\n{person['rank']}"
 
     first_caption, rest = _fit_photo_caption(caption)
-    photo_name = str(person["photo"])
-    photo_path = FACULTY_PHOTO_DIR / photo_name
-    if photo_path.exists():
-        await message.answer_photo(FSInputFile(photo_path), caption=first_caption)
-    else:
-        await message.answer(first_caption)
-
-    for part in _split_long_text(rest):
-        await message.answer(part)
-
-
-async def _send_adpsu_card(message: Message, person: dict[str, str]):
-    caption = (
-        f"<b>{person['full_name']}</b>\n\n"
-        f"{person['position']}\n\n"
-        f"{person['rank']}"
-    )
-    first_caption, rest = _fit_photo_caption(caption)
-    photo_path = ADPSU_PHOTO_DIR / person["photo"]
+    photo_path = BOT_ROOT / str(person["photo_path"])
     if photo_path.exists():
         await message.answer_photo(FSInputFile(photo_path), caption=first_caption)
     else:
@@ -369,19 +246,20 @@ async def cheat_open_leadership_folder(call: CallbackQuery, db: Database):
     source_item_id = int(parts[-2])
     section_id = int(parts[-1])
 
-    if folder == "faculty":
-        for person in FACULTY_PEOPLE:
-            await _send_faculty_card(call.message, str(person["slug"]), "")
+    if folder in LEADERSHIP_GROUP_LABELS:
+        people = await db.list_leadership_people(folder)
+        if not people:
+            kb = InlineKeyboardBuilder()
+            kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
+            await call.message.edit_text(
+                f"Керівництво {LEADERSHIP_GROUP_LABELS[folder]}\n\nРозділ поки не наповнено.",
+                reply_markup=kb.as_markup(),
+            )
+            await call.answer()
+            return
 
-        kb = InlineKeyboardBuilder()
-        kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
-        await call.message.answer("—", reply_markup=kb.as_markup())
-        await call.answer()
-        return
-
-    if folder == "adpsu":
-        for person in ADPSU_PEOPLE:
-            await _send_adpsu_card(call.message, person)
+        for person in people:
+            await _send_leadership_card(call.message, person)
 
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
@@ -417,18 +295,11 @@ async def cheat_open_faculty_person(call: CallbackQuery, db: Database):
     item_id = int(parts[-2])
     section_id = int(parts[-1])
 
-    person = FACULTY_PEOPLE_BY_SLUG.get(slug)
-    if not person:
-        await call.answer("Не знайдено", show_alert=True)
-        return
-
-    await _send_faculty_card(call.message, slug, "")
+    await call.answer("Цей пункт тепер відкривається через папку керівництва.", show_alert=True)
 
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="⬅️ Назад до керівництва", callback_data=f"cheat:sec:{section_id}"))
     await call.message.answer("—", reply_markup=kb.as_markup())
-
-    await call.answer()
 
 
 @r.callback_query(F.data.startswith("cheat:item:"))
@@ -445,19 +316,6 @@ async def cheat_open_item(call: CallbackQuery, db: Database):
 
     title = str(it["title"])
     content = str(it["content"])
-
-    for person in FACULTY_PEOPLE:
-        slug = str(person["slug"])
-        aliases = tuple(str(alias).casefold() for alias in person["aliases"])
-        if any(alias in title.casefold() for alias in aliases):
-            await _send_faculty_card(call.message, slug, "")
-
-            kb = InlineKeyboardBuilder()
-            kb.row(InlineKeyboardButton(text="⬅️ Назад до пунктів", callback_data=f"cheat:sec:{section_id}"))
-            await call.message.answer("—", reply_markup=kb.as_markup())
-
-            await call.answer()
-            return
 
     # 👉 отправляем несколькими сообщениями
     await call.message.answer(f"📄 <b>{title}</b>")

@@ -11,9 +11,25 @@ from app.keyboards.admin import (
     cheat_admin_section_actions_kb,
     cheat_admin_item_actions_kb,
     confirm_delete_kb,
+    leadership_groups_kb,
+    leadership_people_kb,
+    leadership_person_kb,
 )
 
 r = Router()
+
+LEADERSHIP_GROUP_LABELS = {
+    "faculty": "Факультету",
+    "nadpsu": "НАДПСУ",
+    "adpsu": "АДПСУ",
+}
+
+LEADERSHIP_FIELD_LABELS = {
+    "full_name": "ПІБ",
+    "position": "посада",
+    "rank": "звання",
+    "photo_path": "шлях до фото",
+}
 
 
 def _split_text(text: str, limit: int = 3500) -> list[str]:
@@ -156,6 +172,173 @@ async def del_section_do(call: CallbackQuery, db: Database, config: Config):
 # =========================
 # ITEMS (ВАЖНО: порядок!)
 # =========================
+
+@r.callback_query(F.data == "admin:leadership")
+async def leadership_home(call: CallbackQuery, config: Config):
+    if not is_admin(call.from_user.id, config):
+        await call.answer("Немає доступу", show_alert=True)
+        return
+    await call.message.edit_text("👥 Редагування керівництва — оберіть групу:", reply_markup=leadership_groups_kb())
+    await call.answer()
+
+
+@r.callback_query(F.data.startswith("admin:leadership:group:"))
+async def leadership_group(call: CallbackQuery, db: Database, config: Config):
+    if not is_admin(call.from_user.id, config):
+        await call.answer("Немає доступу", show_alert=True)
+        return
+    group_key = call.data.split(":")[-1]
+    people = await db.list_leadership_people(group_key)
+    group_label = LEADERSHIP_GROUP_LABELS.get(group_key, group_key)
+    await call.message.edit_text(
+        f"👥 Керівництво {group_label} — оберіть людину:",
+        reply_markup=leadership_people_kb(group_key, people),
+    )
+    await call.answer()
+
+
+@r.callback_query(F.data.startswith("admin:leadership:person:"))
+async def leadership_person(call: CallbackQuery, db: Database, config: Config):
+    if not is_admin(call.from_user.id, config):
+        await call.answer("Немає доступу", show_alert=True)
+        return
+    person_id = int(call.data.split(":")[-1])
+    person = await db.get_leadership_person(person_id)
+    if not person:
+        await call.answer("Не знайдено", show_alert=True)
+        return
+    text = (
+        f"<b>{person['full_name']}</b>\n\n"
+        f"{person['position']}\n\n"
+        f"{person['rank']}\n\n"
+        f"Фото: <code>{person['photo_path']}</code>"
+    )
+    await call.message.edit_text(
+        text,
+        reply_markup=leadership_person_kb(person_id, str(person["group_key"])),
+    )
+    await call.answer()
+
+
+@r.callback_query(F.data.startswith("admin:leadership:edit:"))
+async def leadership_edit_start(call: CallbackQuery, state: FSMContext, db: Database, config: Config):
+    if not is_admin(call.from_user.id, config):
+        await call.answer("Немає доступу", show_alert=True)
+        return
+    parts = call.data.split(":")
+    person_id = int(parts[-2])
+    field = parts[-1]
+    person = await db.get_leadership_person(person_id)
+    if not person or field not in LEADERSHIP_FIELD_LABELS:
+        await call.answer("Не знайдено", show_alert=True)
+        return
+    await state.set_state(AdminCheat.editing_leadership_field)
+    await state.update_data(person_id=person_id, field=field)
+    await call.message.answer(
+        f"Введіть нове значення для поля <b>{LEADERSHIP_FIELD_LABELS[field]}</b>.\n\n"
+        f"Зараз:\n{person[field]}"
+    )
+    await call.answer()
+
+
+@r.callback_query(F.data.startswith("admin:leadership:add:"))
+async def leadership_add_start(call: CallbackQuery, state: FSMContext, config: Config):
+    if not is_admin(call.from_user.id, config):
+        await call.answer("Немає доступу", show_alert=True)
+        return
+    group_key = call.data.split(":")[-1]
+    if group_key not in LEADERSHIP_GROUP_LABELS:
+        await call.answer("Не знайдено", show_alert=True)
+        return
+    await state.set_state(AdminCheat.creating_leadership_full_name)
+    await state.update_data(group_key=group_key)
+    await call.message.answer("Введіть ПІБ:")
+    await call.answer()
+
+
+@r.message(AdminCheat.creating_leadership_full_name, F.text)
+async def leadership_add_full_name(message: Message, state: FSMContext, config: Config):
+    if not is_admin(message.from_user.id, config):
+        await state.clear()
+        return
+    value = message.text.strip()
+    if len(value) < 2:
+        await message.answer("Занадто коротко. Введіть ПІБ.")
+        return
+    await state.update_data(full_name=value)
+    await state.set_state(AdminCheat.creating_leadership_position)
+    await message.answer("Введіть посаду:")
+
+
+@r.message(AdminCheat.creating_leadership_position, F.text)
+async def leadership_add_position(message: Message, state: FSMContext, config: Config):
+    if not is_admin(message.from_user.id, config):
+        await state.clear()
+        return
+    value = message.text.strip()
+    if len(value) < 2:
+        await message.answer("Занадто коротко. Введіть посаду.")
+        return
+    await state.update_data(position=value)
+    await state.set_state(AdminCheat.creating_leadership_rank)
+    await message.answer("Введіть звання:")
+
+
+@r.message(AdminCheat.creating_leadership_rank, F.text)
+async def leadership_add_rank(message: Message, state: FSMContext, config: Config):
+    if not is_admin(message.from_user.id, config):
+        await state.clear()
+        return
+    value = message.text.strip()
+    if len(value) < 1:
+        await message.answer("Введіть звання.")
+        return
+    await state.update_data(rank=value)
+    await state.set_state(AdminCheat.creating_leadership_photo)
+    await message.answer("Введіть шлях до фото, наприклад: Фото/АДПСУ/ПІБ.jpg")
+
+
+@r.message(AdminCheat.creating_leadership_photo, F.text)
+async def leadership_add_photo(message: Message, state: FSMContext, db: Database, config: Config):
+    if not is_admin(message.from_user.id, config):
+        await state.clear()
+        return
+    data = await state.get_data()
+    photo_path = message.text.strip()
+    await db.create_leadership_person(
+        str(data["group_key"]),
+        str(data["full_name"]),
+        str(data["position"]),
+        str(data["rank"]),
+        photo_path,
+    )
+    await state.clear()
+    people = await db.list_leadership_people(str(data["group_key"]))
+    await message.answer(
+        "✅ Людину додано.",
+        reply_markup=leadership_people_kb(str(data["group_key"]), people),
+    )
+
+
+@r.message(AdminCheat.editing_leadership_field, F.text)
+async def leadership_edit_save(message: Message, state: FSMContext, db: Database, config: Config):
+    if not is_admin(message.from_user.id, config):
+        await state.clear()
+        return
+    data = await state.get_data()
+    person_id = int(data["person_id"])
+    field = str(data["field"])
+    value = message.text.strip()
+    if len(value) < 1:
+        await message.answer("Порожнє значення. Введіть текст.")
+        return
+    await db.update_leadership_field(person_id, field, value)
+    await state.clear()
+    person = await db.get_leadership_person(person_id)
+    await message.answer(
+        "✅ Оновлено.",
+        reply_markup=leadership_person_kb(person_id, str(person["group_key"])),
+    )
 
 @r.callback_query(F.data.startswith("admin:cheat:add_item:"))
 async def add_item_start(call: CallbackQuery, state: FSMContext, config: Config):

@@ -20,3 +20,8 @@ class AdminCheat(StatesGroup):
     creating_item_content = State()
     editing_item_title = State()
     editing_item_content = State()
+    editing_leadership_field = State()
+    creating_leadership_full_name = State()
+    creating_leadership_position = State()
+    creating_leadership_rank = State()
+    creating_leadership_photo = State()
