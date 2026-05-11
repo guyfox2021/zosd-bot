@@ -16,17 +16,17 @@ FACULTY_PHOTO_DIR = BOT_ROOT / "Фото" / "Факультет"
 
 FACULTY_PEOPLE = {
     "sobko": {
-        "label": "Собко",
+        "label": "п-к Собко",
         "aliases": ("Собко",),
         "photo": "Собко.jpg",
     },
     "vyshnevskyi": {
-        "label": "Вишневський",
+        "label": "п-к Вишневський",
         "aliases": ("Вишневський", "Вишневский"),
         "photo": "Вишневський.jpg",
     },
     "lazorenko": {
-        "label": "Лазоренко",
+        "label": "п-к Лазоренко",
         "aliases": ("Лазоренко",),
         "photo": "Лазоренко.jpg",
     },
