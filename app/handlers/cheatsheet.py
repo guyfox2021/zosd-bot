@@ -15,23 +15,37 @@ BOT_ROOT = Path(__file__).resolve().parents[2]
 FACULTY_PHOTO_DIR = BOT_ROOT / "Фото" / "Факультет"
 ADPSU_PHOTO_DIR = BOT_ROOT / "Фото" / "АДПСУ"
 
-FACULTY_PEOPLE = {
-    "sobko": {
+FACULTY_PEOPLE = [
+    {
+        "slug": "sobko",
         "label": "Собко",
         "aliases": ("Собко",),
+        "full_name": "Собко Вадим Григорович",
+        "position": "Начальник (декан) факультету забезпечення оперативно-службової діяльності",
+        "rank": "Полковник",
         "photo": "Собко.jpg",
     },
-    "vyshnevskyi": {
-        "label": "Вишневський",
-        "aliases": ("Вишневський", "Вишневский"),
-        "photo": "Вишневський.jpg",
-    },
-    "lazorenko": {
+    {
+        "slug": "lazorenko",
         "label": "Лазоренко",
         "aliases": ("Лазоренко",),
+        "full_name": "Лазоренко Олександр Васильович",
+        "position": "Заступник начальника (заступник декана) факультету забезпечення оперативно-службової діяльності з навчально-методичної роботи",
+        "rank": "Полковник",
         "photo": "Лазоренко.jpg",
     },
-}
+    {
+        "slug": "vyshnevskyi",
+        "label": "Вишневський",
+        "aliases": ("Вишневський", "Вишневский"),
+        "full_name": "Вишневський Володимир Анатолійович",
+        "position": "Заступник начальника (заступник декана) факультету забезпечення оперативно-службової діяльності з морально-психологічного забезпечення",
+        "rank": "Полковник",
+        "photo": "Вишневський.jpg",
+    },
+]
+
+FACULTY_PEOPLE_BY_SLUG = {person["slug"]: person for person in FACULTY_PEOPLE}
 
 ADPSU_PEOPLE = [
     {
@@ -104,11 +118,11 @@ def leadership_folders_kb(section_id: int, source_item_id: int) -> InlineKeyboar
 
 def faculty_people_kb(section_id: int, source_item_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    for slug, person in FACULTY_PEOPLE.items():
+    for person in FACULTY_PEOPLE:
         kb.add(
             InlineKeyboardButton(
                 text=str(person["label"]),
-                callback_data=f"cheat:faculty:{slug}:{source_item_id}:{section_id}",
+                callback_data=f"cheat:faculty:{person['slug']}:{source_item_id}:{section_id}",
             )
         )
     kb.adjust(1)
@@ -119,14 +133,14 @@ def faculty_people_kb(section_id: int, source_item_id: int) -> InlineKeyboardMar
 def _person_positions(text: str) -> list[tuple[int, str]]:
     lowered = text.casefold()
     positions: list[tuple[int, str]] = []
-    for slug, person in FACULTY_PEOPLE.items():
+    for person in FACULTY_PEOPLE:
         found_positions = [
             lowered.find(str(alias).casefold())
             for alias in person["aliases"]
             if lowered.find(str(alias).casefold()) >= 0
         ]
         if found_positions:
-            positions.append((min(found_positions), slug))
+            positions.append((min(found_positions), str(person["slug"])))
     return sorted(positions)
 
 
@@ -174,7 +188,7 @@ def _extract_person_info(text: str, slug: str) -> str:
 def _strip_person_heading(text: str, slug: str) -> str:
     stripped = text.strip()
     lowered = stripped.casefold()
-    for alias in FACULTY_PEOPLE[slug]["aliases"]:
+    for alias in FACULTY_PEOPLE_BY_SLUG[slug]["aliases"]:
         alias_text = str(alias)
         if lowered.startswith(alias_text.casefold()):
             rest = stripped[len(alias_text):].lstrip(" \n\r\t:-–—.,")
@@ -217,7 +231,7 @@ def _format_faculty_info(slug: str, info: str) -> str:
     if text.casefold().startswith("полковник"):
         text = text[len("Полковник") :].strip()
 
-    for alias in FACULTY_PEOPLE[slug]["aliases"]:
+    for alias in FACULTY_PEOPLE_BY_SLUG[slug]["aliases"]:
         alias_text = str(alias)
         if text.casefold().startswith(alias_text.casefold()):
             text = text[len(alias_text) :].strip()
@@ -246,18 +260,20 @@ def _parse_faculty_info(slug: str, info: str) -> tuple[str, str]:
     if text.casefold().startswith("полковник"):
         text = text[len("Полковник") :].strip()
 
-    return text or str(FACULTY_PEOPLE[slug]["label"]), position
+    return text or str(FACULTY_PEOPLE_BY_SLUG[slug]["label"]), position
 
 
 async def _send_faculty_card(message: Message, slug: str, info: str):
-    full_name, position = _parse_faculty_info(slug, info)
+    person = FACULTY_PEOPLE_BY_SLUG[slug]
+    full_name = str(person["full_name"])
+    position = str(person["position"])
     caption = f"<b>{full_name}</b>"
     if position:
         caption += f"\n\n{position}"
-    caption += "\n\nПолковник"
+    caption += f"\n\n{person['rank']}"
 
     first_caption, rest = _fit_photo_caption(caption)
-    photo_name = str(FACULTY_PEOPLE[slug]["photo"])
+    photo_name = str(person["photo"])
     photo_path = FACULTY_PHOTO_DIR / photo_name
     if photo_path.exists():
         await message.answer_photo(FSInputFile(photo_path), caption=first_caption)
@@ -354,15 +370,8 @@ async def cheat_open_leadership_folder(call: CallbackQuery, db: Database):
     section_id = int(parts[-1])
 
     if folder == "faculty":
-        it = await db.get_item(source_item_id)
-        if not it:
-            await call.answer("Не знайдено", show_alert=True)
-            return
-
-        content = str(it["content"])
-        for slug in FACULTY_PEOPLE:
-            info = _extract_person_info(content, slug) or "Інформацію поки не додано."
-            await _send_faculty_card(call.message, slug, info)
+        for person in FACULTY_PEOPLE:
+            await _send_faculty_card(call.message, str(person["slug"]), "")
 
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
@@ -408,16 +417,12 @@ async def cheat_open_faculty_person(call: CallbackQuery, db: Database):
     item_id = int(parts[-2])
     section_id = int(parts[-1])
 
-    person = FACULTY_PEOPLE.get(slug)
-    it = await db.get_item(item_id)
-    if not person or not it:
+    person = FACULTY_PEOPLE_BY_SLUG.get(slug)
+    if not person:
         await call.answer("Не знайдено", show_alert=True)
         return
 
-    content = str(it["content"])
-    info = _extract_person_info(content, slug) or "Інформацію поки не додано."
-
-    await _send_faculty_card(call.message, slug, info)
+    await _send_faculty_card(call.message, slug, "")
 
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="⬅️ Назад до керівництва", callback_data=f"cheat:sec:{section_id}"))
@@ -441,10 +446,11 @@ async def cheat_open_item(call: CallbackQuery, db: Database):
     title = str(it["title"])
     content = str(it["content"])
 
-    for slug, person in FACULTY_PEOPLE.items():
+    for person in FACULTY_PEOPLE:
+        slug = str(person["slug"])
         aliases = tuple(str(alias).casefold() for alias in person["aliases"])
         if any(alias in title.casefold() for alias in aliases):
-            await _send_faculty_card(call.message, slug, content)
+            await _send_faculty_card(call.message, slug, "")
 
             kb = InlineKeyboardBuilder()
             kb.row(InlineKeyboardButton(text="⬅️ Назад до пунктів", callback_data=f"cheat:sec:{section_id}"))
