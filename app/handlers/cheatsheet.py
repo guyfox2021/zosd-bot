@@ -211,12 +211,28 @@ def _format_faculty_info(slug: str, info: str) -> str:
     return "\n".join(lines).strip()
 
 
+def _parse_faculty_info(slug: str, info: str) -> tuple[str, str]:
+    text = info.strip()
+    open_pos = text.find("(")
+    close_pos = text.rfind(")")
+
+    position = ""
+    if open_pos >= 0 and close_pos > open_pos:
+        position = text[open_pos + 1 : close_pos].strip()
+        text = text[:open_pos].strip()
+
+    if text.casefold().startswith("полковник"):
+        text = text[len("Полковник") :].strip()
+
+    return text or str(FACULTY_PEOPLE[slug]["label"]), position
+
+
 async def _send_faculty_card(message: Message, slug: str, info: str):
-    label = str(FACULTY_PEOPLE[slug]["label"])
-    body = _format_faculty_info(slug, info)
-    caption = f"<b>{label}</b>"
-    if body:
-        caption += f"\n\n{body}"
+    full_name, position = _parse_faculty_info(slug, info)
+    caption = f"<b>{full_name}</b>"
+    if position:
+        caption += f"\n\n{position}"
+    caption += "\n\nПолковник"
 
     first_caption, rest = _fit_photo_caption(caption)
     photo_name = str(FACULTY_PEOPLE[slug]["photo"])
