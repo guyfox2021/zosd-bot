@@ -16,17 +16,17 @@ FACULTY_PHOTO_DIR = BOT_ROOT / "Фото" / "Факультет"
 
 FACULTY_PEOPLE = {
     "sobko": {
-        "label": "п-к Собко",
+        "label": "Собко",
         "aliases": ("Собко",),
         "photo": "Собко.jpg",
     },
     "vyshnevskyi": {
-        "label": "п-к Вишневський",
+        "label": "Вишневський",
         "aliases": ("Вишневський", "Вишневский"),
         "photo": "Вишневський.jpg",
     },
     "lazorenko": {
-        "label": "п-к Лазоренко",
+        "label": "Лазоренко",
         "aliases": ("Лазоренко",),
         "photo": "Лазоренко.jpg",
     },
@@ -175,9 +175,16 @@ def _fit_photo_caption(text: str) -> tuple[str, str]:
     return text[:cut].strip(), text[cut:].strip()
 
 
+def _with_colonel_rank_at_bottom(text: str) -> str:
+    lines = [line.strip() for line in text.strip().splitlines()]
+    lines = [line for line in lines if line.casefold() != "полковник"]
+    body = "\n".join(lines).strip()
+    return f"{body}\n\nПолковник" if body else "Полковник"
+
+
 async def _send_faculty_card(message: Message, slug: str, info: str):
     label = str(FACULTY_PEOPLE[slug]["label"])
-    body = _strip_person_heading(info, slug)
+    body = _with_colonel_rank_at_bottom(_strip_person_heading(info, slug))
     caption = f"<b>{label}</b>"
     if body:
         caption += f"\n\n{body}"
