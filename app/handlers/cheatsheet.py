@@ -55,6 +55,31 @@ def cheat_items_kb(section_id: int, items) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def leadership_folders_kb(section_id: int, source_item_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.add(
+        InlineKeyboardButton(
+            text="📁 Факультету",
+            callback_data=f"cheat:leadership:faculty:{source_item_id}:{section_id}",
+        )
+    )
+    kb.add(
+        InlineKeyboardButton(
+            text="📁 НАДПСУ",
+            callback_data=f"cheat:leadership:nadpsu:{source_item_id}:{section_id}",
+        )
+    )
+    kb.add(
+        InlineKeyboardButton(
+            text="📁 АДПСУ",
+            callback_data=f"cheat:leadership:adpsu:{source_item_id}:{section_id}",
+        )
+    )
+    kb.adjust(1)
+    kb.row(InlineKeyboardButton(text="⬅️ До розділів", callback_data="cheat:home"))
+    return kb.as_markup()
+
+
 def faculty_people_kb(section_id: int, source_item_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for slug, person in FACULTY_PEOPLE.items():
@@ -65,7 +90,7 @@ def faculty_people_kb(section_id: int, source_item_id: int) -> InlineKeyboardMar
             )
         )
     kb.adjust(1)
-    kb.row(InlineKeyboardButton(text="⬅️ До розділів", callback_data="cheat:home"))
+    kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
     return kb.as_markup()
 
 
@@ -93,6 +118,24 @@ def _find_faculty_source_item(items):
         if has_people or has_faculty_title:
             return it
     return None
+
+
+def _find_leadership_folder_items(items, folder: str, source_item_id: int):
+    if folder == "nadpsu":
+        keywords = ("надпсу",)
+    elif folder == "adpsu":
+        keywords = ("адпсу",)
+    else:
+        return []
+
+    result = []
+    for it in items:
+        if int(it["id"]) == source_item_id:
+            continue
+        title = str(it["title"]).casefold()
+        if any(keyword in title for keyword in keywords):
+            result.append(it)
+    return result
 
 
 def _extract_person_info(text: str, slug: str) -> str:
@@ -201,13 +244,49 @@ async def cheat_open_section(call: CallbackQuery, db: Database):
     faculty_source_item = _find_faculty_source_item(items)
     if faculty_source_item:
         await call.message.edit_text(
-            "Керівництво факультету — оберіть прізвище:",
-            reply_markup=faculty_people_kb(section_id, int(faculty_source_item["id"])),
+            "Керівництво — оберіть папку:",
+            reply_markup=leadership_folders_kb(section_id, int(faculty_source_item["id"])),
         )
         await call.answer()
         return
 
     await call.message.edit_text(f"📁 Розділ #{section_id}. Оберіть пункт:", reply_markup=cheat_items_kb(section_id, items))
+    await call.answer()
+
+
+@r.callback_query(F.data.startswith("cheat:leadership:"))
+async def cheat_open_leadership_folder(call: CallbackQuery, db: Database):
+    # формат: cheat:leadership:{folder}:{source_item_id}:{section_id}
+    parts = call.data.split(":")
+    folder = parts[-3]
+    source_item_id = int(parts[-2])
+    section_id = int(parts[-1])
+
+    if folder == "faculty":
+        await call.message.edit_text(
+            "Керівництво факультету — оберіть прізвище:",
+            reply_markup=faculty_people_kb(section_id, source_item_id),
+        )
+        await call.answer()
+        return
+
+    items = await db.list_items(section_id)
+    folder_items = _find_leadership_folder_items(items, folder, source_item_id)
+    folder_title = "НАДПСУ" if folder == "nadpsu" else "АДПСУ"
+
+    if folder_items:
+        await call.message.edit_text(
+            f"Керівництво {folder_title} — оберіть пункт:",
+            reply_markup=cheat_items_kb(section_id, folder_items),
+        )
+    else:
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
+        await call.message.edit_text(
+            f"Керівництво {folder_title}\n\nРозділ поки не наповнено.",
+            reply_markup=kb.as_markup(),
+        )
+
     await call.answer()
 
 
