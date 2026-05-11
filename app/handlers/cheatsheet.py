@@ -182,9 +182,38 @@ def _with_colonel_rank_at_bottom(text: str) -> str:
     return f"{body}\n\nПолковник" if body else "Полковник"
 
 
+def _format_faculty_info(slug: str, info: str) -> str:
+    text = info.strip()
+    open_pos = text.find("(")
+    close_pos = text.rfind(")")
+
+    position = ""
+    if open_pos >= 0 and close_pos > open_pos:
+        position = text[open_pos + 1 : close_pos].strip()
+        text = text[:open_pos].strip()
+
+    if text.casefold().startswith("полковник"):
+        text = text[len("Полковник") :].strip()
+
+    for alias in FACULTY_PEOPLE[slug]["aliases"]:
+        alias_text = str(alias)
+        if text.casefold().startswith(alias_text.casefold()):
+            text = text[len(alias_text) :].strip()
+            break
+
+    lines = []
+    if text:
+        lines.append(text)
+    if position:
+        lines.append(f"({position})")
+    lines.append("")
+    lines.append("Полковник")
+    return "\n".join(lines).strip()
+
+
 async def _send_faculty_card(message: Message, slug: str, info: str):
     label = str(FACULTY_PEOPLE[slug]["label"])
-    body = _with_colonel_rank_at_bottom(_strip_person_heading(info, slug))
+    body = _format_faculty_info(slug, info)
     caption = f"<b>{label}</b>"
     if body:
         caption += f"\n\n{body}"
