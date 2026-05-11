@@ -13,6 +13,7 @@ r = Router()
 TELEGRAM_PHOTO_CAPTION_LIMIT = 1024
 BOT_ROOT = Path(__file__).resolve().parents[2]
 FACULTY_PHOTO_DIR = BOT_ROOT / "Фото" / "Факультет"
+ADPSU_PHOTO_DIR = BOT_ROOT / "Фото" / "АДПСУ"
 
 FACULTY_PEOPLE = {
     "sobko": {
@@ -31,6 +32,27 @@ FACULTY_PEOPLE = {
         "photo": "Лазоренко.jpg",
     },
 }
+
+ADPSU_PEOPLE = [
+    {
+        "full_name": "ВАВРИНЮК Валерій Павлович",
+        "position": "ТИМЧАСОВО ВИКОНУЮЧИЙ ОБОВ'ЯЗКИ ГОЛОВИ ДЕРЖАВНОЇ ПРИКОРДОННОЇ СЛУЖБИ УКРАЇНИ",
+        "rank": "генерал-майор",
+        "photo": "ВАВРИНЮК.jpg",
+    },
+    {
+        "full_name": "ЧЕНЧИК Вадим Миколайович",
+        "position": "Заступник Голови Державної прикордонної служби України",
+        "rank": "генерал-майор",
+        "photo": "ЧЕНЧИК.jpg",
+    },
+    {
+        "full_name": "СЕРДЮК Сергій Іванович",
+        "position": "Заступник Голови Державної прикордонної служби України",
+        "rank": "генерал-майор",
+        "photo": "СЕРДЮК.jpg",
+    },
+]
 
 
 def cheat_sections_kb(sections) -> InlineKeyboardMarkup:
@@ -246,6 +268,23 @@ async def _send_faculty_card(message: Message, slug: str, info: str):
         await message.answer(part)
 
 
+async def _send_adpsu_card(message: Message, person: dict[str, str]):
+    caption = (
+        f"<b>{person['full_name']}</b>\n\n"
+        f"{person['position']}\n\n"
+        f"{person['rank']}"
+    )
+    first_caption, rest = _fit_photo_caption(caption)
+    photo_path = ADPSU_PHOTO_DIR / person["photo"]
+    if photo_path.exists():
+        await message.answer_photo(FSInputFile(photo_path), caption=first_caption)
+    else:
+        await message.answer(first_caption)
+
+    for part in _split_long_text(rest):
+        await message.answer(part)
+
+
 def _split_long_text(text: str, max_len: int = 3500) -> list[str]:
     """
     Ріжемо по абзацах (подвійний перенос), щоб не ламати формат,
@@ -324,6 +363,16 @@ async def cheat_open_leadership_folder(call: CallbackQuery, db: Database):
         for slug in FACULTY_PEOPLE:
             info = _extract_person_info(content, slug) or "Інформацію поки не додано."
             await _send_faculty_card(call.message, slug, info)
+
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
+        await call.message.answer("—", reply_markup=kb.as_markup())
+        await call.answer()
+        return
+
+    if folder == "adpsu":
+        for person in ADPSU_PEOPLE:
+            await _send_adpsu_card(call.message, person)
 
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="⬅️ До папок", callback_data=f"cheat:sec:{section_id}"))
