@@ -33,7 +33,6 @@ async def admin_stats(call: CallbackQuery, db: Database, config: Config):
     ticket_authors = await db.count_ticket_authors()
     total_sections = await db.count_cheat_sections()
     total_items = await db.count_cheat_items()
-    top_users = await db.top_ticket_authors(limit=5)
 
     answered = status_counts.get("answered", 0)
     new = status_counts.get("new", 0)
@@ -57,11 +56,6 @@ async def admin_stats(call: CallbackQuery, db: Database, config: Config):
         f"🔹 Розділів шпаргалки: {total_sections}",
         f"🔹 Пунктів шпаргалки: {total_items}",
     ])
-
-    if top_users:
-        lines.append("\nТоп користувачів за кількістю звернень:")
-        for idx, (user_id, count) in enumerate(top_users, start=1):
-            lines.append(f"    {idx}. ID {user_id}: {count}")
 
     await call.message.answer("\n".join(lines), reply_markup=admin_panel_kb())
     await call.answer()
