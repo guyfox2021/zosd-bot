@@ -27,16 +27,27 @@ async def main():
     )
 
     dp = Dispatcher()
+
+    # These middlewares are written against Message/CallbackQuery (they use
+    # isinstance() and read .from_user). Registering them on dp.update would
+    # hand them the raw Update object instead, which has no .from_user and
+    # isn't a Message/CallbackQuery -- every check silently no-ops and every
+    # update is let through. They must be registered per event type instead.
+    #
     # Access must run before Subscription so the "sub:check" callback can
     # never reach send_welcome() for a user who hasn't passed the password gate.
     from app.middlewares.access import AccessMiddleware
-    dp.update.outer_middleware(AccessMiddleware())
-
     from app.middlewares.subscription import SubscriptionMiddleware
-    dp.update.outer_middleware(SubscriptionMiddleware())
-
     from app.handlers._debug_mw import DebugUpdatesMiddleware
-    dp.update.outer_middleware(DebugUpdatesMiddleware())
+
+    access_mw = AccessMiddleware()
+    subscription_mw = SubscriptionMiddleware()
+    debug_mw = DebugUpdatesMiddleware()
+
+    for observer in (dp.message, dp.callback_query):
+        observer.outer_middleware(access_mw)
+        observer.outer_middleware(subscription_mw)
+        observer.outer_middleware(debug_mw)
 
     dp["db"] = db
     dp["config"] = config
