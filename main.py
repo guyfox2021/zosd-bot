@@ -27,11 +27,13 @@ async def main():
     )
 
     dp = Dispatcher()
-    from app.middlewares.subscription import SubscriptionMiddleware
-    dp.update.outer_middleware(SubscriptionMiddleware())
-
+    # Access must run before Subscription so the "sub:check" callback can
+    # never reach send_welcome() for a user who hasn't passed the password gate.
     from app.middlewares.access import AccessMiddleware
     dp.update.outer_middleware(AccessMiddleware())
+
+    from app.middlewares.subscription import SubscriptionMiddleware
+    dp.update.outer_middleware(SubscriptionMiddleware())
 
     from app.handlers._debug_mw import DebugUpdatesMiddleware
     dp.update.outer_middleware(DebugUpdatesMiddleware())

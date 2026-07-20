@@ -195,24 +195,19 @@ class Database:
         return await cur.fetchone() is not None
 
     async def check_and_use_password(self, password: str, user_id: int) -> bool:
-        """Check if password exists and unused. If valid, mark as used and authorize user."""
+        """Atomically check if password is unused and mark it used, authorizing the user on success."""
         assert self.conn is not None
         cur = await self.conn.execute(
-            "SELECT id FROM access_passwords WHERE password = ? AND used = 0;",
-            (password,),
+            """UPDATE access_passwords
+               SET used = 1, used_by_user_id = ?, used_at = datetime('now')
+               WHERE password = ? AND used = 0;""",
+            (user_id, password),
         )
-        row = await cur.fetchone()
-        if not row:
-            return False
-        
-        pwd_id = row["id"]
-        await self.conn.execute(
-            "UPDATE access_passwords SET used = 1, used_by_user_id = ?, used_at = datetime('now') WHERE id = ?;",
-            (user_id, pwd_id),
-        )
-        await self.authorize_user(user_id)
+        success = cur.rowcount == 1
+        if success:
+            await self.authorize_user(user_id)
         await self.conn.commit()
-        return True
+        return success
 
     async def get_unused_passwords_count(self) -> int:
         """Count unused passwords."""
